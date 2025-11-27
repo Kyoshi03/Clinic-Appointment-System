@@ -290,3 +290,4 @@ $currentUser = isLoggedIn() ? getCurrentUser() : null;
         }
     });
     </script>
+
