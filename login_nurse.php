@@ -3,6 +3,10 @@ require_once 'includes/session.php';
 
 $error = '';
 
+if ($_SERVER['REQUEST_METHOD'] === 'GET' && isLoggedIn()) {
+    redirectToDashboardForCurrentUser();
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $username = $_POST['username'] ?? '';
     $password = $_POST['password'] ?? '';
@@ -15,9 +19,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($user['role'] === 'nurse') {
                 header('Location: nurse.php');
                 exit();
+            }
+            if ($user['role'] === 'doctor') {
+                header('Location: view_appointments.php');
+                exit();
             } else {
                 logout();
-                $error = 'Access denied. This login is for nurses/doctors only.';
+                $error = 'Access denied. This login is for nurses and clinic doctors only.';
             }
         } else {
             $error = 'Invalid username or password.';
@@ -305,6 +313,9 @@ $additionalStyles = '
     <meta charset="UTF-8">
     <title><?php echo htmlspecialchars($pageTitle); ?></title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" type="image/x-icon" href="favicon.ico">
+    <link rel="icon" type="image/png" href="favicon.png">
+    <link rel="apple-touch-icon" href="globalife.png">
     <link rel="stylesheet" href="main.css">
     <style><?php echo $additionalStyles; ?></style>
 </head>
@@ -315,7 +326,7 @@ $additionalStyles = '
                 <img src="globalife.png" alt="Clinic Logo" class="login-logo">
                 <span class="role-badge">Nurse / Doctor</span>
                 <h2>Medical Portal</h2>
-                <p class="login-subtitle">Sign in to access patient records</p>
+                <p class="login-subtitle">Sign in to review patient records, medical history, and laboratory results</p>
             </div>
             
             <?php if ($error): ?>
