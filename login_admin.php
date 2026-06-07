@@ -3,6 +3,10 @@ require_once 'includes/session.php';
 
 $error = '';
 
+if ($_SERVER['REQUEST_METHOD'] === 'GET' && isLoggedIn()) {
+    redirectToDashboardForCurrentUser();
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $username = $_POST['username'] ?? '';
     $password = $_POST['password'] ?? '';
@@ -305,6 +309,9 @@ $additionalStyles = '
     <meta charset="UTF-8">
     <title><?php echo htmlspecialchars($pageTitle); ?></title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" type="image/x-icon" href="favicon.ico">
+    <link rel="icon" type="image/png" href="favicon.png">
+    <link rel="apple-touch-icon" href="globalife.png">
     <link rel="stylesheet" href="main.css">
     <style><?php echo $additionalStyles; ?></style>
 </head>

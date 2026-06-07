@@ -1,0 +1,93 @@
+<?php
+require_once 'includes/session.php';
+require_once 'config/database.php';
+require_once 'includes/appointment_booking.php';
+
+if (!isLoggedIn()) {
+    header('Location: index.php');
+    exit();
+}
+
+$currentUser = getCurrentUser();
+$userRole = $currentUser['role'];
+
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    header('Location: view_appointments.php');
+    exit();
+}
+
+$appointment_id = $_POST['appointment_id'] ?? '';
+$new_status = $_POST['status'] ?? '';
+
+if (empty($appointment_id) || empty($new_status)) {
+    $_SESSION['error'] = 'Invalid request.';
+    header('Location: view_appointments.php');
+    exit();
+}
+
+$conn = getDBConnection();
+
+// Check if appointment exists and user has permission
+$checkStmt = $conn->prepare("SELECT patient_id, doctor_id, status FROM appointments WHERE id = ?");
+$checkStmt->bind_param("i", $appointment_id);
+$checkStmt->execute();
+$result = $checkStmt->get_result();
+
+if ($result->num_rows === 0) {
+    $_SESSION['error'] = 'Appointment not found.';
+    $checkStmt->close();
+    $conn->close();
+    header('Location: view_appointments.php');
+    exit();
+}
+
+$appointment = $result->fetch_assoc();
+$checkStmt->close();
+
+// Check permissions
+$canUpdate = false;
+if ($userRole === 'admin' || $userRole === 'receptionist') {
+    $canUpdate = true; // Admin and receptionist can update any appointment
+} elseif ($userRole === 'nurse' && ($appointment['doctor_id'] == $currentUser['id'] || $appointment['doctor_id'] === null)) {
+    $canUpdate = true; // Nurse can update their own appointments
+} elseif ($userRole === 'patient' && $appointment['patient_id'] == $currentUser['id']) {
+    // Patients can only cancel their own appointments
+    if ($new_status === 'cancelled' && ($appointment['status'] === 'pending' || $appointment['status'] === 'confirmed')) {
+        $canUpdate = true;
+    }
+}
+
+if (!$canUpdate) {
+    $_SESSION['error'] = 'You do not have permission to update this appointment.';
+    $conn->close();
+    header('Location: view_appointments.php');
+    exit();
+}
+
+// Update appointment status
+$updateStmt = $conn->prepare("UPDATE appointments SET status = ? WHERE id = ?");
+$updateStmt->bind_param("si", $new_status, $appointment_id);
+
+if ($updateStmt->execute()) {
+    $_SESSION['success'] = 'Appointment status updated successfully.';
+    if ($new_status === 'confirmed' && $appointment['status'] !== 'confirmed') {
+        $emailResult = appointment_send_clinic_confirmation_email($conn, (int) $appointment_id);
+        if (!$emailResult['ok']) {
+            $_SESSION['success'] .= ' The status was saved, but the confirmation email could not be delivered.';
+        }
+    }
+} else {
+    $_SESSION['error'] = 'Error updating appointment status.';
+}
+
+$updateStmt->close();
+$conn->close();
+
+header('Location: view_appointments.php');
+exit();
+
+
+
+
+
+

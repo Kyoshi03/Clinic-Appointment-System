@@ -1,0 +1,4 @@
+config/production.php
+config/mail.production.php
+config/mail.local.php
+logs/*.log

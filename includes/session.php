@@ -9,6 +9,32 @@ function isLoggedIn() {
     return isset($_SESSION['user_id']);
 }
 
+function dashboardForRole(string $role): string {
+    switch ($role) {
+        case 'admin':
+            return 'admin.php';
+        case 'nurse':
+            return 'nurse.php';
+        case 'doctor':
+            return 'view_appointments.php';
+        case 'receptionist':
+            return 'receptionist.php';
+        case 'patient':
+            return 'patients.php';
+        default:
+            return 'index.php';
+    }
+}
+
+function redirectToDashboardForCurrentUser(): void {
+    if (!isLoggedIn()) {
+        return;
+    }
+
+    header('Location: ' . dashboardForRole((string) $_SESSION['user_role']));
+    exit();
+}
+
 // Check user role
 function checkRole($requiredRole) {
     if (!isLoggedIn()) {
@@ -17,6 +43,18 @@ function checkRole($requiredRole) {
     }
     
     if ($_SESSION['user_role'] !== $requiredRole) {
+        header('Location: index.php');
+        exit();
+    }
+}
+
+/** Allow any of the given roles (e.g. nurse + doctor for clinical pages). */
+function checkAnyRole(array $requiredRoles) {
+    if (!isLoggedIn()) {
+        header('Location: index.php');
+        exit();
+    }
+    if (!in_array($_SESSION['user_role'], $requiredRoles, true)) {
         header('Location: index.php');
         exit();
     }
@@ -41,13 +79,19 @@ function login($username, $password) {
     require_once __DIR__ . '/../config/database.php';
     $conn = getDBConnection();
     
-    $stmt = $conn->prepare("SELECT id, username, password, full_name, role FROM users WHERE username = ?");
+    $stmt = $conn->prepare("SELECT id, username, password, full_name, role, COALESCE(is_active, 1) AS is_active FROM users WHERE username = ?");
     $stmt->bind_param("s", $username);
     $stmt->execute();
     $result = $stmt->get_result();
     
     if ($result->num_rows === 1) {
         $user = $result->fetch_assoc();
+        if ($user['role'] === 'doctor' && (int) $user['is_active'] !== 1) {
+            $stmt->close();
+            $conn->close();
+            return false;
+        }
+
         if (password_verify($password, $user['password'])) {
             $_SESSION['user_id'] = $user['id'];
             $_SESSION['username'] = $user['username'];

@@ -3,6 +3,20 @@ if (!isset($pageTitle)) {
     $pageTitle = "Globalife Medical Laboratory & Polyclinic";
 }
 $currentUser = isLoggedIn() ? getCurrentUser() : null;
+$headerLoginHref = $publicLoginHref ?? 'login.php';
+$headerSignUpHref = $publicSignUpHref ?? 'register_patient.php';
+$headerPatientPhotoUrl = $headerPatientPhotoUrl ?? null;
+$headerPatientInitials = $headerPatientInitials ?? ($profileInitials ?? null);
+$headerPatientDisplayName = $headerPatientDisplayName ?? null;
+$headerBrandOnly = !empty($headerBrandOnly);
+$currentPage = basename($_SERVER['PHP_SELF'] ?? '');
+$logoHref = 'index.php';
+if ($currentPage === 'index.php') {
+    $logoHref = '#home';
+}
+if (isLoggedIn()) {
+    $logoHref = dashboardForRole($currentUser['role']);
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -10,7 +24,13 @@ $currentUser = isLoggedIn() ? getCurrentUser() : null;
     <meta charset="UTF-8">
     <title><?php echo htmlspecialchars($pageTitle); ?></title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" type="image/x-icon" href="favicon.ico">
+    <link rel="icon" type="image/png" href="favicon.png">
+    <link rel="apple-touch-icon" href="globalife.png">
     <link rel="stylesheet" href="main.css">
+    <?php if (isset($additionalHeadLinks)): ?>
+        <?php echo $additionalHeadLinks; ?>
+    <?php endif; ?>
     <?php if (isset($additionalStyles)): ?>
         <style><?php echo $additionalStyles; ?></style>
     <?php endif; ?>
@@ -38,6 +58,14 @@ $currentUser = isLoggedIn() ? getCurrentUser() : null;
         padding: 18px 20px;
         max-width: 1400px;
         margin: 0 auto;
+    }
+    .header-flex.brand-only {
+        justify-content: center;
+        max-width: 900px;
+        min-height: 88px;
+    }
+    .header-flex.brand-only .logo-section {
+        text-align: center;
     }
     .logo-section {
         display: flex;
@@ -113,7 +141,7 @@ $currentUser = isLoggedIn() ? getCurrentUser() : null;
     nav a.active::before {
         width: 70%;
     }
-    .login-btn, .logout-btn {
+    .login-btn, .logout-btn, .signup-btn {
         background: rgba(255, 255, 255, 0.2);
         backdrop-filter: blur(10px);
         color: #fff;
@@ -127,11 +155,21 @@ $currentUser = isLoggedIn() ? getCurrentUser() : null;
         font-size: 0.95rem;
         white-space: nowrap;
     }
-    .login-btn:hover, .logout-btn:hover {
+    .login-btn:hover, .logout-btn:hover, .signup-btn:hover {
         background: rgba(255, 255, 255, 0.3);
         border-color: rgba(255, 255, 255, 0.5);
         transform: translateY(-2px);
         box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+    }
+    .signup-btn {
+        background: #fff;
+        color: #023e8a;
+        border-color: #fff;
+    }
+    .signup-btn:hover {
+        background: #caf0f8;
+        color: #023e8a;
+        border-color: #caf0f8;
     }
     .logout-btn {
         background: rgba(217, 4, 41, 0.2);
@@ -140,6 +178,86 @@ $currentUser = isLoggedIn() ? getCurrentUser() : null;
     .logout-btn:hover {
         background: rgba(217, 4, 41, 0.3);
         border-color: rgba(217, 4, 41, 0.6);
+    }
+    .logout-confirm-overlay {
+        position: fixed;
+        inset: 0;
+        z-index: 3000;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 20px;
+        background: rgba(7, 59, 76, 0.62);
+        opacity: 0;
+        pointer-events: none;
+        visibility: hidden;
+        transition: opacity 0.2s ease, visibility 0.2s ease;
+    }
+    .logout-confirm-overlay.is-open {
+        opacity: 1;
+        pointer-events: auto;
+        visibility: visible;
+    }
+    .logout-confirm-box {
+        width: min(100%, 420px);
+        box-sizing: border-box;
+        background: #fff;
+        border: 1px solid #dceef2;
+        border-radius: 8px;
+        box-shadow: 0 24px 70px rgba(0, 0, 0, 0.24);
+        padding: 28px;
+        text-align: center;
+    }
+    .logout-confirm-icon {
+        width: 58px;
+        height: 58px;
+        margin: 0 auto 16px;
+        border-radius: 50%;
+        background: #fff4e6;
+        color: #c2410c;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 1.55rem;
+        font-weight: 800;
+    }
+    .logout-confirm-box h2 {
+        color: #073b4c;
+        font-size: 1.35rem;
+        margin: 0 0 8px;
+    }
+    .logout-confirm-box p {
+        color: #51636d;
+        line-height: 1.55;
+        margin: 0 0 22px;
+    }
+    .logout-confirm-actions {
+        display: flex;
+        gap: 12px;
+    }
+    .logout-confirm-actions button {
+        flex: 1;
+        min-height: 44px;
+        border-radius: 8px;
+        cursor: pointer;
+        font-weight: 800;
+        font-family: inherit;
+    }
+    .logout-cancel-btn {
+        background: #f0f7fa;
+        color: #073b4c;
+        border: 1px solid #cfe4e9;
+    }
+    .logout-confirm-btn {
+        background: #d90429;
+        color: #fff;
+        border: 1px solid #d90429;
+    }
+    .logout-cancel-btn:hover {
+        background: #e4f2f6;
+    }
+    .logout-confirm-btn:hover {
+        background: #b00020;
     }
     .user-info {
         display: flex;
@@ -162,6 +280,10 @@ $currentUser = isLoggedIn() ? getCurrentUser() : null;
         font-weight: 700;
         font-size: 0.9rem;
         border: 2px solid rgba(255, 255, 255, 0.3);
+    }
+    .user-avatar-photo {
+        object-fit: cover;
+        background: #fff;
     }
     .user-name {
         font-size: 0.9rem;
@@ -225,59 +347,93 @@ $currentUser = isLoggedIn() ? getCurrentUser() : null;
 </head>
 <body>
     <header id="mainHeader">
-        <div class="header-flex">
-            <a href="<?php echo isLoggedIn() ? ($currentUser['role'] === 'patient' ? 'patients.php' : ($currentUser['role'] === 'admin' ? 'admin.php' : ($currentUser['role'] === 'nurse' ? 'nurse.php' : 'receptionist.php'))) : 'index.php'; ?>" class="logo-section">
+        <div class="header-flex<?php echo $headerBrandOnly ? ' brand-only' : ''; ?>">
+            <a href="<?php echo htmlspecialchars($logoHref); ?>" class="logo-section" data-logo-home="<?php echo $currentPage === 'index.php' ? '1' : '0'; ?>">
                 <img src="globalife.png" alt="Clinic Logo" class="logo-img">
                 <h1>Globalife Medical Laboratory & Polyclinic</h1>
             </a>
-            <button class="mobile-menu-toggle" onclick="toggleMobileMenu()">☰</button>
-            <nav id="mainNav">
+            <?php if (!$headerBrandOnly): ?>
+                <button class="mobile-menu-toggle" onclick="toggleMobileMenu()" aria-label="Open menu">☰</button>
+                <nav id="mainNav">
                 <?php if (isLoggedIn()): ?>
                     <?php if ($currentUser['role'] === 'admin'): ?>
                         <a href="admin.php" class="<?php echo basename($_SERVER['PHP_SELF']) === 'admin.php' ? 'active' : ''; ?>">Dashboard</a>
                         <a href="#">Users</a>
-                        <a href="#">Appointments</a>
+                        <a href="view_appointments.php" class="<?php echo basename($_SERVER['PHP_SELF']) === 'view_appointments.php' ? 'active' : ''; ?>">Appointments</a>
+                        <a href="admin_lab_services.php" class="<?php echo basename($_SERVER['PHP_SELF']) === 'admin_lab_services.php' ? 'active' : ''; ?>">Lab services</a>
+                        <a href="admin_doctors.php" class="<?php echo basename($_SERVER['PHP_SELF']) === 'admin_doctors.php' ? 'active' : ''; ?>">Doctors</a>
                         <a href="#">Settings</a>
+                    <?php elseif ($currentUser['role'] === 'doctor'): ?>
+                        <a href="view_appointments.php" class="<?php echo basename($_SERVER['PHP_SELF']) === 'view_appointments.php' ? 'active' : ''; ?>">My appointments</a>
+                        <a href="nurse_patients.php" class="<?php echo in_array(basename($_SERVER['PHP_SELF']), ['nurse_patients.php', 'nurse_patient.php'], true) ? 'active' : ''; ?>">Patients</a>
                     <?php elseif ($currentUser['role'] === 'nurse'): ?>
                         <a href="nurse.php" class="<?php echo basename($_SERVER['PHP_SELF']) === 'nurse.php' ? 'active' : ''; ?>">Dashboard</a>
-                        <a href="#">Patients</a>
+                        <a href="view_appointments.php" class="<?php echo basename($_SERVER['PHP_SELF']) === 'view_appointments.php' ? 'active' : ''; ?>">Appointments</a>
+                        <a href="nurse_patients.php" class="<?php echo in_array(basename($_SERVER['PHP_SELF']), ['nurse_patients.php', 'nurse_patient.php'], true) ? 'active' : ''; ?>">Patients</a>
+                        <a href="nurse_doctors.php" class="<?php echo basename($_SERVER['PHP_SELF']) === 'nurse_doctors.php' ? 'active' : ''; ?>">Doctors</a>
                     <?php elseif ($currentUser['role'] === 'receptionist'): ?>
                         <a href="receptionist.php" class="<?php echo basename($_SERVER['PHP_SELF']) === 'receptionist.php' ? 'active' : ''; ?>">Dashboard</a>
-                        <a href="#">Appointments</a>
-                        <a href="#">Patients</a>
-                        <a href="#">Doctors</a>
+                        <a href="view_appointments.php" class="<?php echo basename($_SERVER['PHP_SELF']) === 'view_appointments.php' ? 'active' : ''; ?>">Appointments</a>
+                        <a href="register_patient_receptionist.php" class="<?php echo basename($_SERVER['PHP_SELF']) === 'register_patient_receptionist.php' ? 'active' : ''; ?>">Patients</a>
+                        <a href="receptionist_doctors.php" class="<?php echo basename($_SERVER['PHP_SELF']) === 'receptionist_doctors.php' ? 'active' : ''; ?>">Doctor schedules</a>
+                        <a href="receptionist_lab_services.php" class="<?php echo basename($_SERVER['PHP_SELF']) === 'receptionist_lab_services.php' ? 'active' : ''; ?>">Lab tests (view)</a>
                     <?php elseif ($currentUser['role'] === 'patient'): ?>
                         <div class="user-info">
-                            <div class="user-avatar"><?php echo strtoupper(substr($currentUser['full_name'], 0, 1)); ?></div>
-                            <span class="user-name"><?php echo htmlspecialchars(explode(' ', $currentUser['full_name'])[0]); ?></span>
+                            <?php
+                            $patientHeaderName = trim((string) ($headerPatientDisplayName ?? $currentUser['full_name']));
+                            $patientHeaderFirstName = explode(' ', $patientHeaderName)[0] ?? 'Patient';
+                            $patientHeaderInitials = trim((string) ($headerPatientInitials ?? strtoupper(substr($patientHeaderName, 0, 1))));
+                            ?>
+                            <?php if (!empty($headerPatientPhotoUrl)): ?>
+                                <img src="<?php echo htmlspecialchars((string) $headerPatientPhotoUrl); ?>" alt="Profile photo" class="user-avatar user-avatar-photo">
+                            <?php else: ?>
+                                <div class="user-avatar"><?php echo htmlspecialchars($patientHeaderInitials); ?></div>
+                            <?php endif; ?>
+                            <span class="user-name"><?php echo htmlspecialchars($patientHeaderFirstName); ?></span>
                         </div>
                         <a href="patients.php" class="<?php echo basename($_SERVER['PHP_SELF']) === 'patients.php' ? 'active' : ''; ?>">Dashboard</a>
-                        <a href="#">My Appointment</a>
-                        <a href="#">Book Appointment</a>
-                        <a href="#">Doctor</a>
+                        <a href="view_appointments.php" class="<?php echo basename($_SERVER['PHP_SELF']) === 'view_appointments.php' ? 'active' : ''; ?>">My Appointments</a>
+                        <a href="book_appointment.php" class="<?php echo basename($_SERVER['PHP_SELF']) === 'book_appointment.php' ? 'active' : ''; ?>">Book Appointment</a>
+                        <a href="patient_medical_records.php" class="<?php echo basename($_SERVER['PHP_SELF']) === 'patient_medical_records.php' ? 'active' : ''; ?>">My Clinic Records</a>
                     <?php endif; ?>
-                    <form action="logout.php" method="post" style="display:inline;">
-                        <button type="submit" class="logout-btn">Logout</button>
+                    <form action="logout.php" method="post" style="display:inline;" class="logout-form">
+                        <button type="submit" class="logout-btn">Log Out</button>
                     </form>
                 <?php else: ?>
-                    <a href="index.php">Home</a>
+                    <a href="#home">Home</a>
                     <a href="#about">About</a>
                     <a href="#services">Services</a>
-                    <a href="#contact">Contact</a>
-                    <a href="login.php" class="login-btn">Login</a>
+                    <a href="<?php echo htmlspecialchars($headerLoginHref); ?>" class="login-btn">Log In</a>
+                    <a href="<?php echo htmlspecialchars($headerSignUpHref); ?>" class="signup-btn">Sign Up</a>
                 <?php endif; ?>
-            </nav>
+                </nav>
+            <?php endif; ?>
         </div>
     </header>
+    <?php if (isLoggedIn()): ?>
+        <div class="logout-confirm-overlay" id="logoutConfirm" role="dialog" aria-modal="true" aria-labelledby="logoutConfirmTitle" aria-hidden="true">
+            <div class="logout-confirm-box">
+                <div class="logout-confirm-icon" aria-hidden="true">?</div>
+                <h2 id="logoutConfirmTitle">Are you sure you want to log out?</h2>
+                <p>You will be returned to the homepage. Make sure any changes you need are saved before leaving.</p>
+                <div class="logout-confirm-actions">
+                    <button type="button" class="logout-cancel-btn" data-logout-cancel>Stay Logged In</button>
+                    <button type="button" class="logout-confirm-btn" data-logout-confirm>Yes, Log Out</button>
+                </div>
+            </div>
+        </div>
+    <?php endif; ?>
     <script>
     function toggleMobileMenu() {
         const nav = document.getElementById('mainNav');
-        nav.classList.toggle('active');
+        if (nav) {
+            nav.classList.toggle('active');
+        }
     }
     document.addEventListener('click', function(event) {
         const nav = document.getElementById('mainNav');
         const toggle = document.querySelector('.mobile-menu-toggle');
-        if (!nav.contains(event.target) && !toggle.contains(event.target)) {
+        if (nav && toggle && !nav.contains(event.target) && !toggle.contains(event.target)) {
             nav.classList.remove('active');
         }
     });
@@ -289,5 +445,72 @@ $currentUser = isLoggedIn() ? getCurrentUser() : null;
             header.classList.remove('scrolled');
         }
     });
-    </script>
+    (function() {
+        const logoutForms = document.querySelectorAll('.logout-form');
+        const modal = document.getElementById('logoutConfirm');
+        const cancelBtn = document.querySelector('[data-logout-cancel]');
+        const confirmBtn = document.querySelector('[data-logout-confirm]');
+        let pendingForm = null;
 
+        function openLogoutConfirm(form) {
+            pendingForm = form;
+            if (!modal) {
+                form.submit();
+                return;
+            }
+            modal.classList.add('is-open');
+            modal.setAttribute('aria-hidden', 'false');
+            if (confirmBtn) {
+                confirmBtn.focus();
+            }
+        }
+
+        function closeLogoutConfirm() {
+            pendingForm = null;
+            if (!modal) {
+                return;
+            }
+            modal.classList.remove('is-open');
+            modal.setAttribute('aria-hidden', 'true');
+        }
+
+        logoutForms.forEach(function(form) {
+            form.addEventListener('submit', function(event) {
+                if (form.dataset.confirmed === 'true') {
+                    return;
+                }
+                event.preventDefault();
+                openLogoutConfirm(form);
+            });
+        });
+
+        if (cancelBtn) {
+            cancelBtn.addEventListener('click', closeLogoutConfirm);
+        }
+
+        if (confirmBtn) {
+            confirmBtn.addEventListener('click', function() {
+                if (!pendingForm) {
+                    closeLogoutConfirm();
+                    return;
+                }
+                pendingForm.dataset.confirmed = 'true';
+                pendingForm.submit();
+            });
+        }
+
+        if (modal) {
+            modal.addEventListener('click', function(event) {
+                if (event.target === modal) {
+                    closeLogoutConfirm();
+                }
+            });
+        }
+
+        document.addEventListener('keydown', function(event) {
+            if (event.key === 'Escape' && modal && modal.classList.contains('is-open')) {
+                closeLogoutConfirm();
+            }
+        });
+    })();
+    </script>

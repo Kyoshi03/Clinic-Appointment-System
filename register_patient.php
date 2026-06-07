@@ -1,9 +1,34 @@
 <?php
+header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+header('Pragma: no-cache');
+header('Expires: 0');
+
 require_once 'includes/session.php';
 require_once 'config/database.php';
+require_once 'includes/mailer.php';
 
 $error = '';
 $success = '';
+$showPasswordPopup = false;
+$showSuccessPopup = false;
+$passwordPopupMessage = '';
+$registeredUsername = '';
+$registeredDisplayName = '';
+
+if (
+    $_SERVER['REQUEST_METHOD'] === 'GET'
+    && isset($_GET['created'])
+    && $_GET['created'] === '1'
+    && !empty($_SESSION['patient_registration_success'])
+) {
+    $registrationSuccess = $_SESSION['patient_registration_success'];
+    unset($_SESSION['patient_registration_success']);
+
+    $success = 'You have successfully created an account.';
+    $showSuccessPopup = true;
+    $registeredUsername = (string) ($registrationSuccess['username'] ?? '');
+    $registeredDisplayName = (string) ($registrationSuccess['display_name'] ?? '');
+}
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $full_name = trim($_POST['full_name'] ?? '');
@@ -21,6 +46,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $emergency_contact_name = trim($_POST['emergency_contact_name'] ?? '');
     $emergency_contact_relationship = trim($_POST['emergency_contact_relationship'] ?? '');
     $emergency_contact_number = trim($_POST['emergency_contact_number'] ?? '');
+    $agree_clinic_terms = !empty($_POST['agree_clinic_terms']);
     
     // Calculate age from date of birth
     $age = null;
@@ -53,16 +79,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     
     // Validation
     if (empty($full_name) || empty($gender) || empty($date_of_birth) || empty($phone) || empty($email) || empty($barangay) || empty($city) || empty($username) || empty($password) || empty($confirm_password)) {
-        $error = 'Please fill in all required fields.';
+        $error = 'Please fill in all required fields marked with *.';
+    } elseif (!$agree_clinic_terms) {
+        $error = 'Please read and agree to the clinic privacy notice before creating your account.';
     } elseif ($password !== $confirm_password) {
-        $error = 'Passwords do not match.';
+        $showPasswordPopup = true;
+        $passwordPopupMessage = 'Password and confirm password do not match. Please type them again.';
     } elseif (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
         $error = 'Please enter a valid email address.';
     } else {
         // Validate password requirements
         $passwordErrors = validatePassword($password);
         if (!empty($passwordErrors)) {
-            $error = implode(' ', $passwordErrors);
+            $showPasswordPopup = true;
+            $passwordPopupMessage = implode(' ', $passwordErrors);
         } else {
         $conn = getDBConnection();
         
@@ -103,19 +133,47 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $full_address .= (!empty($full_address) ? ', ' : '') . $city;
                 }
                 
-                // Insert new user
-                $stmt = $conn->prepare("INSERT INTO users (username, password, full_name, role, email, phone, gender, date_of_birth, age, civil_status, address, barangay, city, emergency_contact_name, emergency_contact_relationship, emergency_contact_number) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
-                $stmt->bind_param("ssssssssisssssss", $username, $hashed_password, $full_name, $role, $email, $phone, $gender, $date_of_birth, $age, $civil_status, $full_address, $barangay, $city, $emergency_contact_name, $emergency_contact_relationship, $emergency_contact_number);
-                
-                if ($stmt->execute()) {
-                    $success = 'Registration successful! You can now login.';
-                    // Clear form data on success
-                    $_POST = array();
+                $verificationCode = (string) random_int(100000, 999999);
+                $_SESSION['pending_patient_registration'] = [
+                    'data' => [
+                        'username' => $username,
+                        'password' => $hashed_password,
+                        'full_name' => $full_name,
+                        'role' => $role,
+                        'email' => strtolower($email),
+                        'phone' => $phone,
+                        'gender' => $gender,
+                        'date_of_birth' => $date_of_birth,
+                        'age' => $age,
+                        'civil_status' => $civil_status,
+                        'address' => $full_address,
+                        'barangay' => $barangay,
+                        'city' => $city,
+                        'emergency_contact_name' => $emergency_contact_name,
+                        'emergency_contact_relationship' => $emergency_contact_relationship,
+                        'emergency_contact_number' => $emergency_contact_number,
+                    ],
+                    'code_hash' => password_hash($verificationCode, PASSWORD_DEFAULT),
+                    'expires_at' => time() + 10 * 60,
+                    'sent_at' => time(),
+                    'attempts' => 0,
+                ];
+
+                $sent = clinic_send_otp_email(
+                    strtolower($email),
+                    $full_name,
+                    $verificationCode,
+                    'registration'
+                );
+
+                if (!$sent['ok']) {
+                    unset($_SESSION['pending_patient_registration']);
+                    $error = $sent['error'];
                 } else {
-                    $error = 'Registration failed. Please try again.';
+                    $conn->close();
+                    header('Location: verify_patient_email.php?sent=1');
+                    exit();
                 }
-                
-                $stmt->close();
             }
         }
         
@@ -509,6 +567,311 @@ $additionalStyles = '
         color: #0077b6;
         text-decoration: underline;
     }
+    .popup-overlay {
+        display: none;
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.5);
+        z-index: 1000;
+        align-items: center;
+        justify-content: center;
+        padding: 20px;
+        animation: fadeIn 0.25s ease;
+    }
+    .popup-overlay.active {
+        display: flex;
+    }
+    @keyframes fadeIn {
+        from { opacity: 0; }
+        to { opacity: 1; }
+    }
+    .popup-box {
+        background: #fff;
+        border-radius: 16px;
+        padding: 32px 28px;
+        max-width: 400px;
+        width: 100%;
+        text-align: center;
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+        animation: popIn 0.3s ease;
+        border-top: 4px solid #48cae4;
+    }
+    @keyframes popIn {
+        from {
+            opacity: 0;
+            transform: scale(0.9) translateY(10px);
+        }
+        to {
+            opacity: 1;
+            transform: scale(1) translateY(0);
+        }
+    }
+    .popup-box.error {
+        border-top-color: #dc3545;
+    }
+    .popup-box.success {
+        border-top-color: #28a745;
+    }
+    .popup-icon {
+        width: 56px;
+        height: 56px;
+        margin: 0 auto 16px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+    .popup-icon.error {
+        background: linear-gradient(135deg, #ff6b6b 0%, #ee5a6f 100%);
+        color: #fff;
+    }
+    .popup-icon.success {
+        background: linear-gradient(135deg, #51cf66 0%, #40c057 100%);
+        color: #fff;
+    }
+    .popup-icon svg {
+        width: 28px;
+        height: 28px;
+    }
+    .popup-title {
+        font-size: 1.25rem;
+        font-weight: 700;
+        color: #333;
+        margin: 0 0 10px;
+    }
+    .popup-message {
+        color: #666;
+        font-size: 0.95rem;
+        margin: 0 0 24px;
+        line-height: 1.5;
+    }
+    .popup-actions {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+    }
+    .popup-actions.row {
+        flex-direction: row;
+        gap: 12px;
+    }
+    .popup-btn {
+        flex: 1;
+        padding: 12px 20px;
+        border: none;
+        border-radius: 10px;
+        font-size: 0.95rem;
+        font-weight: 600;
+        cursor: pointer;
+        text-decoration: none;
+        display: inline-block;
+        transition: all 0.2s ease;
+        font-family: inherit;
+    }
+    .popup-btn-primary {
+        background: linear-gradient(135deg, #48cae4 0%, #0077b6 100%);
+        color: #fff;
+        box-shadow: 0 4px 12px rgba(72, 202, 228, 0.4);
+    }
+    .popup-btn-primary:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 6px 16px rgba(72, 202, 228, 0.5);
+    }
+    .popup-btn-secondary {
+        background: #f0f4f8;
+        color: #0077b6;
+        border: 2px solid #48cae4;
+    }
+    .popup-btn-secondary:hover {
+        background: #e8f4f8;
+    }
+    .popup-btn-danger {
+        background: linear-gradient(135deg, #ff6b6b 0%, #ee5a6f 100%);
+        color: #fff;
+        box-shadow: 0 4px 12px rgba(238, 90, 111, 0.3);
+    }
+    .popup-btn-danger:hover {
+        transform: translateY(-1px);
+    }
+    .reg-guide {
+        background: linear-gradient(135deg, #e8f8fc 0%, #f0faf9 100%);
+        border: 1px solid rgba(72, 202, 228, 0.45);
+        border-radius: 12px;
+        padding: 16px 18px;
+        margin-bottom: 22px;
+        text-align: left;
+    }
+    .reg-guide-title {
+        color: #0077b6;
+        font-weight: 700;
+        font-size: 0.95rem;
+        margin: 0 0 8px;
+    }
+    .reg-guide p {
+        color: #51636d;
+        font-size: 0.88rem;
+        line-height: 1.55;
+        margin: 0 0 10px;
+    }
+    .reg-guide ul {
+        margin: 0;
+        padding-left: 18px;
+        color: #435761;
+        font-size: 0.86rem;
+        line-height: 1.6;
+    }
+    .required-legend {
+        font-size: 0.82rem;
+        color: #6c7a83;
+        margin: 0 0 18px;
+        text-align: left;
+    }
+    .required-legend strong {
+        color: #c92a2a;
+    }
+    .field-hint {
+        display: block;
+        margin-top: 6px;
+        font-size: 0.8rem;
+        color: #6c7a83;
+        line-height: 1.4;
+        font-weight: 500;
+    }
+    .terms-box {
+        display: flex;
+        gap: 12px;
+        align-items: flex-start;
+        background: #f8fcfd;
+        border: 1px solid #d0ebf2;
+        border-radius: 12px;
+        padding: 14px 16px;
+        margin: 8px 0 20px;
+        text-align: left;
+    }
+    .terms-box input {
+        margin-top: 4px;
+        width: 18px;
+        height: 18px;
+        flex-shrink: 0;
+        accent-color: #0077b6;
+    }
+    .terms-box label {
+        font-size: 0.88rem;
+        color: #435761;
+        line-height: 1.55;
+        font-weight: 500;
+        cursor: pointer;
+    }
+    .popup-box.success-popup {
+        max-width: 460px;
+        text-align: left;
+        padding: 28px 26px 24px;
+    }
+    .success-popup-header {
+        text-align: center;
+        margin-bottom: 18px;
+    }
+    .success-popup-logo {
+        width: 64px;
+        height: 64px;
+        border-radius: 50%;
+        border: 3px solid #48cae4;
+        margin: 0 auto 12px;
+        object-fit: contain;
+        background: #fff;
+    }
+    .popup-icon.success.pulse {
+        animation: successPulse 1.2s ease 2;
+    }
+    @keyframes successPulse {
+        0%, 100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(64, 192, 87, 0.4); }
+        50% { transform: scale(1.06); box-shadow: 0 0 0 12px rgba(64, 192, 87, 0); }
+    }
+    .username-save-box {
+        background: #f0f9ff;
+        border: 2px dashed #48cae4;
+        border-radius: 12px;
+        padding: 14px 16px;
+        margin: 0 0 16px;
+    }
+    .username-save-label {
+        font-size: 0.78rem;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        color: #0077b6;
+        font-weight: 700;
+        margin: 0 0 6px;
+    }
+    .username-save-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+    }
+    .username-save-value {
+        font-size: 1.15rem;
+        font-weight: 800;
+        color: #073b4c;
+        word-break: break-all;
+    }
+    .copy-username-btn {
+        padding: 8px 14px;
+        border-radius: 8px;
+        border: none;
+        background: #0077b6;
+        color: #fff;
+        font-size: 0.82rem;
+        font-weight: 700;
+        cursor: pointer;
+        font-family: inherit;
+    }
+    .copy-username-btn:hover {
+        background: #023e8a;
+    }
+    .success-next-steps {
+        margin: 0 0 20px;
+        padding: 0;
+        list-style: none;
+    }
+    .success-next-steps li {
+        display: flex;
+        gap: 12px;
+        align-items: flex-start;
+        margin-bottom: 12px;
+        font-size: 0.9rem;
+        color: #435761;
+        line-height: 1.45;
+    }
+    .success-step-num {
+        flex-shrink: 0;
+        width: 26px;
+        height: 26px;
+        border-radius: 50%;
+        background: linear-gradient(135deg, #48cae4, #0077b6);
+        color: #fff;
+        font-weight: 800;
+        font-size: 0.8rem;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+    .success-clinic-note {
+        font-size: 0.82rem;
+        color: #6c7a83;
+        background: #fff8e6;
+        border: 1px solid #ffe08a;
+        border-radius: 10px;
+        padding: 10px 12px;
+        margin: 0 0 18px;
+        line-height: 1.5;
+    }
+    .popup-box.success-popup .popup-actions {
+        flex-direction: column;
+    }
+    .popup-box.success-popup .popup-btn {
+        width: 100%;
+        text-align: center;
+        box-sizing: border-box;
+    }
     @media (max-width: 600px) {
         .login-container {
             padding: 40px 30px;
@@ -520,6 +883,9 @@ $additionalStyles = '
         .form-row {
             grid-template-columns: 1fr;
         }
+        .popup-actions.row {
+            flex-direction: column;
+        }
     }
 ';
 
@@ -530,6 +896,9 @@ $additionalStyles = '
     <meta charset="UTF-8">
     <title><?php echo htmlspecialchars($pageTitle); ?></title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" type="image/x-icon" href="favicon.ico">
+    <link rel="icon" type="image/png" href="favicon.png">
+    <link rel="apple-touch-icon" href="globalife.png">
     <link rel="stylesheet" href="main.css">
     <style><?php echo $additionalStyles; ?></style>
 </head>
@@ -540,8 +909,19 @@ $additionalStyles = '
                 <img src="globalife.png" alt="Clinic Logo" class="login-logo">
                 <span class="role-badge">Patient</span>
                 <h2>Create Account</h2>
-                <p class="login-subtitle">Register to access patient portal</p>
+                <p class="login-subtitle">Register to book appointments and view your clinic records online</p>
             </div>
+
+            <div class="reg-guide" role="note">
+                <p class="reg-guide-title">Before you register</p>
+                <p>Use accurate details (same as your valid ID when possible). Our clinic uses this for appointments, lab results, and emergency contact.</p>
+                <ul>
+                    <li>Active mobile number and email (for reminders and password reset)</li>
+                    <li>A username you will remember — you need it every time you log in</li>
+                    <li>Emergency contact (recommended for urgent clinic situations)</li>
+                </ul>
+            </div>
+            <p class="required-legend"><strong>*</strong> Required fields</p>
             
             <?php if ($error): ?>
                 <div class="error-message">
@@ -552,14 +932,6 @@ $additionalStyles = '
                 </div>
             <?php endif; ?>
             
-            <?php if ($success): ?>
-                <div class="success-message">
-                    <svg class="success-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                    </svg>
-                    <span><?php echo htmlspecialchars($success); ?></span>
-                </div>
-            <?php endif; ?>
             
             <form method="POST" action="register_patient.php" id="registerForm">
                 <!-- Personal Information -->
@@ -574,6 +946,7 @@ $additionalStyles = '
                             </svg>
                             <input type="text" id="full_name" name="full_name" placeholder="Enter your full name" required autofocus value="<?php echo (!empty($success) ? '' : (isset($_POST['full_name']) ? htmlspecialchars($_POST['full_name']) : '')); ?>">
                         </div>
+                        <span class="field-hint">Use your complete name as it appears on clinic records or valid ID.</span>
                     </div>
                     
                     <div class="form-row">
@@ -643,18 +1016,20 @@ $additionalStyles = '
                                 <svg class="input-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
                                 </svg>
-                                <input type="tel" id="phone" name="phone" placeholder="Enter mobile number" required value="<?php echo (!empty($success) ? '' : (isset($_POST['phone']) ? htmlspecialchars($_POST['phone']) : '')); ?>">
+                                <input type="tel" id="phone" name="phone" placeholder="e.g. 09171234567" required pattern="[0-9+\s\-]{10,15}" value="<?php echo (!empty($success) ? '' : (isset($_POST['phone']) ? htmlspecialchars($_POST['phone']) : '')); ?>">
                             </div>
+                            <span class="field-hint">For SMS or call about your appointment and lab updates.</span>
                         </div>
                         
                         <div class="form-group">
-                            <label for="email">Email Address</label>
+                            <label for="email">Email Address (verification required)</label>
                             <div class="input-wrapper">
                                 <svg class="input-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
                                 </svg>
-                                <input type="email" id="email" name="email" placeholder="Enter your email" required value="<?php echo (!empty($success) ? '' : (isset($_POST['email']) ? htmlspecialchars($_POST['email']) : '')); ?>">
+                                <input type="email" id="email" name="email" placeholder="you@example.com" required value="<?php echo (!empty($success) ? '' : (isset($_POST['email']) ? htmlspecialchars($_POST['email']) : '')); ?>">
                             </div>
+                            <span class="field-hint">We will send a 6-digit code to confirm that this email belongs to you.</span>
                         </div>
                     </div>
                     
@@ -702,8 +1077,9 @@ $additionalStyles = '
                             <svg class="input-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
                             </svg>
-                            <input type="text" id="username" name="username" placeholder="Choose a username" required value="<?php echo (!empty($success) ? '' : (isset($_POST['username']) ? htmlspecialchars($_POST['username']) : '')); ?>">
+                            <input type="text" id="username" name="username" placeholder="Choose a username" required autocomplete="username" value="<?php echo (!empty($success) ? '' : (isset($_POST['username']) ? htmlspecialchars($_POST['username']) : '')); ?>">
                         </div>
+                        <span class="field-hint">Save this — you will enter it every time you log in to the patient portal.</span>
                     </div>
                     
                     <div class="form-row">
@@ -775,7 +1151,8 @@ $additionalStyles = '
                 
                 <!-- Emergency Contact -->
                 <div class="form-section">
-                    <div class="form-section-title">Emergency Contact <span style="color: #999; font-size: 0.85rem; font-weight: normal;">(Recommended)</span></div>
+                    <div class="form-section-title">Emergency Contact <span style="color: #0077b6; font-size: 0.85rem; font-weight: 600;">(Recommended for clinic safety)</span></div>
+                    <p class="field-hint" style="margin: -8px 0 14px;">Helps our staff reach a family member if you need urgent assistance during a visit.</p>
                     
                     <div class="form-group">
                         <label for="emergency_contact_name">Name</label>
@@ -809,14 +1186,21 @@ $additionalStyles = '
                         </div>
                     </div>
                 </div>
+
+                <div class="terms-box">
+                    <input type="checkbox" id="agree_clinic_terms" name="agree_clinic_terms" value="1" required <?php echo (!empty($_POST['agree_clinic_terms']) && empty($success)) ? 'checked' : ''; ?>>
+                    <label for="agree_clinic_terms">
+                        I agree that Globalife Medical Laboratory &amp; Polyclinic may collect and use my information for patient records, appointments, laboratory services, and contact related to my care. I confirm the details above are accurate.
+                    </label>
+                </div>
                 
-                <button type="submit" class="login-btn-form">
-                    <span>Create Account</span>
+                <button type="submit" class="login-btn-form" id="submitRegisterBtn">
+                    <span>Continue and Verify Email</span>
                 </button>
             </form>
             
             <div class="login-link">
-                Already have an account? <a href="login_patient.php">Sign in here</a>
+                Already have an account? <a href="index.php#patient-login">Go to Login</a> | <a href="forgot_password.php">Forgot password?</a>
             </div>
             
             <div class="back-to-home">
@@ -829,14 +1213,105 @@ $additionalStyles = '
             </div>
         </div>
     </div>
+
+    <!-- Password error popup -->
+    <div class="popup-overlay" id="passwordPopup" role="dialog" aria-modal="true" aria-labelledby="passwordPopupTitle">
+        <div class="popup-box error">
+            <div class="popup-icon error">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                </svg>
+            </div>
+            <h3 class="popup-title" id="passwordPopupTitle">Password Not Correct</h3>
+            <p class="popup-message" id="passwordPopupMessage"><?php echo htmlspecialchars($passwordPopupMessage ?: 'Password and confirm password do not match, or your password does not meet the requirements. Please check the list below and try again.'); ?></p>
+            <div class="popup-actions">
+                <button type="button" class="popup-btn popup-btn-danger" id="passwordPopupClose">OK</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Success popup -->
+    <div class="popup-overlay<?php echo $showSuccessPopup ? ' active' : ''; ?>" id="successPopup" role="dialog" aria-modal="true" aria-labelledby="successPopupTitle" data-no-dismiss="true">
+        <div class="popup-box success success-popup">
+            <div class="success-popup-header">
+                <img src="globalife.png" alt="" class="success-popup-logo">
+                <div class="popup-icon success pulse">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                </div>
+                <h3 class="popup-title" id="successPopupTitle" style="margin-bottom: 6px;">You have successfully created an account</h3>
+                <p class="popup-message" style="margin-bottom: 0; text-align: center;">
+                    <?php if ($registeredDisplayName !== ''): ?>
+                        Welcome, <strong><?php echo htmlspecialchars($registeredDisplayName); ?></strong>. Your patient account is ready to use.
+                    <?php else: ?>
+                        Your patient portal account is ready to use.
+                    <?php endif; ?>
+                </p>
+            </div>
+
+            <?php if ($registeredUsername !== ''): ?>
+            <div class="username-save-box">
+                <p class="username-save-label">Save your username</p>
+                <div class="username-save-row">
+                    <span class="username-save-value" id="registeredUsernameDisplay"><?php echo htmlspecialchars($registeredUsername); ?></span>
+                    <button type="button" class="copy-username-btn" id="copyUsernameBtn">Copy</button>
+                </div>
+            </div>
+            <?php endif; ?>
+
+            <p style="font-weight: 700; color: #073b4c; font-size: 0.95rem; margin: 0 0 10px; text-align: center;">Go back to sign in and use your username and password.</p>
+            <ol class="success-next-steps">
+                <li>
+                    <span class="success-step-num">1</span>
+                    <span>Use the username above and the password you created.</span>
+                </li>
+                <li>
+                    <span class="success-step-num">2</span>
+                    <span>Select <strong>Back to Sign In</strong> to log in to your patient dashboard.</span>
+                </li>
+                <li>
+                    <span class="success-step-num">3</span>
+                    <span>After logging in, you can book a clinic or laboratory appointment.</span>
+                </li>
+            </ol>
+
+            <p class="success-clinic-note">
+                Bring a valid ID on your visit. Payment for services is done at the clinic unless staff advises otherwise.
+            </p>
+
+            <div class="popup-actions">
+                <a href="index.php?registered=1#patient-login" class="popup-btn popup-btn-primary" id="successLoginBtn">Back to Sign In</a>
+            </div>
+        </div>
+    </div>
+
     <script>
+        function showPopup(id) {
+            const overlay = document.getElementById(id);
+            if (overlay) {
+                overlay.classList.add('active');
+                document.body.style.overflow = 'hidden';
+            }
+        }
+
+        function hidePopup(id) {
+            const overlay = document.getElementById(id);
+            if (overlay) {
+                overlay.classList.remove('active');
+                document.body.style.overflow = '';
+            }
+        }
+
         document.addEventListener('DOMContentLoaded', function() {
             // Clear form if registration was successful
-            <?php if (!empty($success)): ?>
+            <?php if ($showPasswordPopup): ?>
+            showPopup('passwordPopup');
+            <?php endif; ?>
+            <?php if ($showSuccessPopup): ?>
             const form = document.getElementById('registerForm');
             if (form) {
                 form.reset();
-                // Clear age display
                 const ageDisplay = document.getElementById('ageDisplay');
                 if (ageDisplay) {
                     ageDisplay.style.display = 'none';
@@ -846,8 +1321,51 @@ $additionalStyles = '
                     ageInput.value = '';
                 }
             }
+            showPopup('successPopup');
+            const successLoginBtn = document.getElementById('successLoginBtn');
+            if (successLoginBtn) {
+                window.setTimeout(function () {
+                    successLoginBtn.focus();
+                }, 350);
+            }
             <?php endif; ?>
-            
+
+            const copyUsernameBtn = document.getElementById('copyUsernameBtn');
+            const registeredUsernameDisplay = document.getElementById('registeredUsernameDisplay');
+            if (copyUsernameBtn && registeredUsernameDisplay) {
+                copyUsernameBtn.addEventListener('click', function () {
+                    const text = registeredUsernameDisplay.textContent.trim();
+                    if (navigator.clipboard && navigator.clipboard.writeText) {
+                        navigator.clipboard.writeText(text).then(function () {
+                            copyUsernameBtn.textContent = 'Copied!';
+                            window.setTimeout(function () {
+                                copyUsernameBtn.textContent = 'Copy';
+                            }, 2000);
+                        });
+                    } else {
+                        window.prompt('Copy your username:', text);
+                    }
+                });
+            }
+
+            document.getElementById('passwordPopupClose').addEventListener('click', function() {
+                hidePopup('passwordPopup');
+            });
+            document.getElementById('passwordPopup').addEventListener('click', function(e) {
+                if (e.target === this) {
+                    hidePopup('passwordPopup');
+                }
+            });
+
+            const successPopup = document.getElementById('successPopup');
+            if (successPopup) {
+                successPopup.addEventListener('click', function (e) {
+                    if (e.target === successPopup && successPopup.getAttribute('data-no-dismiss') === 'true') {
+                        e.stopPropagation();
+                    }
+                });
+            }
+
             const passwordInput = document.getElementById('password');
             const confirmPasswordInput = document.getElementById('confirm_password');
             const passwordToggle = document.getElementById('passwordToggle');
@@ -998,15 +1516,25 @@ $additionalStyles = '
                 const reqs = validatePasswordRequirements(passwordInput.value);
                 const allValid = Object.values(reqs).every(v => v === true);
                 
-                if (!allValid) {
+                if (!allValid || passwordInput.value !== confirmPasswordInput.value) {
                     e.preventDefault();
-                    alert('Please meet all password requirements before submitting.');
+                    const msgEl = document.getElementById('passwordPopupMessage');
+                    if (msgEl) {
+                        if (passwordInput.value !== confirmPasswordInput.value) {
+                            msgEl.textContent = 'Password and confirm password do not match. Please type them again.';
+                        } else {
+                            msgEl.textContent = 'Your password does not meet all requirements. Check the green checkmarks below the password field.';
+                        }
+                    }
+                    showPopup('passwordPopup');
                     return false;
                 }
-                
-                if (passwordInput.value !== confirmPasswordInput.value) {
+
+                const terms = document.getElementById('agree_clinic_terms');
+                if (terms && !terms.checked) {
                     e.preventDefault();
-                    alert('Passwords do not match!');
+                    terms.focus();
+                    alert('Please agree to the clinic privacy notice before creating your account.');
                     return false;
                 }
             });
@@ -1014,3 +1542,5 @@ $additionalStyles = '
     </script>
 </body>
 </html>
+
+
