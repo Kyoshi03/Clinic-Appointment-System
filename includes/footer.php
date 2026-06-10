@@ -6,9 +6,9 @@
     <?php if (isset($additionalScripts)): ?>
         <script><?php echo $additionalScripts; ?></script>
     <?php endif; ?>
+    <script src="birthday-picker.js"></script>
 </body>
 </html>
-
 
 
 

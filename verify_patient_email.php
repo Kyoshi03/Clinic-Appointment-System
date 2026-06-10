@@ -6,6 +6,7 @@ header('Expires: 0');
 require_once 'includes/session.php';
 require_once 'config/database.php';
 require_once 'includes/mailer.php';
+require_once 'includes/admin_notifications.php';
 
 if (empty($_SESSION['pending_patient_registration']['data'])) {
     header('Location: register_patient.php');
@@ -132,12 +133,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $emergencyNumber
                 );
                 $created = $insert->execute();
+                $newPatientId = $created ? (int) $insert->insert_id : 0;
                 $insert->close();
-                $conn->close();
 
                 if (!$created) {
+                    $conn->close();
                     $error = 'We could not create your account. Please try again.';
                 } else {
+                    $registrationSource = (string) ($patient['registration_source'] ?? '');
+                    $notificationMessage = $fullName . ' created a verified patient account';
+                    if ($registrationSource === 'walkin_qr') {
+                        $notificationMessage .= ' using the reception desk QR code.';
+                    } else {
+                        $notificationMessage .= '.';
+                    }
+                    create_admin_notification(
+                        $conn,
+                        'patient_registration',
+                        'New patient account',
+                        $notificationMessage,
+                        $newPatientId
+                    );
+                    $conn->close();
                     $_SESSION['patient_pending_welcome'] = true;
                     $_SESSION['patient_registration_success'] = [
                         'username' => $patient['username'],

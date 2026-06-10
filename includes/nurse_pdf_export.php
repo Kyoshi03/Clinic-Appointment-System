@@ -39,8 +39,20 @@ function clinic_pdf_center_text(array &$ops, float $y, float $size, string $text
     clinic_pdf_text($ops, max(45, $x), $y, $size, $clean, $bold);
 }
 
+function clinic_pdf_white_center_text(array &$ops, float $y, float $size, string $text): void {
+    $clean = clinic_pdf_clean($text);
+    $x = 297.5 - (strlen($clean) * $size * 0.25);
+    $ops[] = sprintf(
+        "1 1 1 rg BT /F2 %.2F Tf 1 0 0 1 %.2F %.2F Tm (%s) Tj ET",
+        $size,
+        max(45, $x),
+        $y,
+        clinic_pdf_escape($clean)
+    );
+}
+
 function clinic_pdf_line(array &$ops, float $x1, float $y1, float $x2, float $y2, float $width = 1.0): void {
-    $ops[] = sprintf("0.00 0.32 0.68 RG %.2F w %.2F %.2F m %.2F %.2F l S", $width, $x1, $y1, $x2, $y2);
+    $ops[] = sprintf("0.08 0.56 0.57 RG %.2F w %.2F %.2F m %.2F %.2F l S", $width, $x1, $y1, $x2, $y2);
 }
 
 function clinic_pdf_rect(array &$ops, float $x, float $y, float $w, float $h, bool $fill = false): void {
@@ -69,6 +81,140 @@ function clinic_pdf_wrap(string $text, int $maxChars): array {
     return $out;
 }
 
+function clinic_pdf_paeth(int $a, int $b, int $c): int {
+    $p = $a + $b - $c;
+    $pa = abs($p - $a);
+    $pb = abs($p - $b);
+    $pc = abs($p - $c);
+    if ($pa <= $pb && $pa <= $pc) {
+        return $a;
+    }
+    return $pb <= $pc ? $b : $c;
+}
+
+function clinic_pdf_png_image(string $path): ?array {
+    $png = @file_get_contents($path);
+    if ($png === false || substr($png, 0, 8) !== "\x89PNG\r\n\x1a\n") {
+        return null;
+    }
+
+    $offset = 8;
+    $length = strlen($png);
+    $width = 0;
+    $height = 0;
+    $bitDepth = 0;
+    $colorType = -1;
+    $compressed = '';
+
+    while ($offset + 12 <= $length) {
+        $chunkLength = unpack('N', substr($png, $offset, 4))[1];
+        $chunkType = substr($png, $offset + 4, 4);
+        $chunkData = substr($png, $offset + 8, $chunkLength);
+        $offset += 12 + $chunkLength;
+
+        if ($chunkType === 'IHDR' && strlen($chunkData) >= 13) {
+            $header = unpack('Nwidth/Nheight/CbitDepth/CcolorType/Ccompression/Cfilter/Cinterlace', $chunkData);
+            $width = (int) $header['width'];
+            $height = (int) $header['height'];
+            $bitDepth = (int) $header['bitDepth'];
+            $colorType = (int) $header['colorType'];
+            if ((int) $header['interlace'] !== 0) {
+                return null;
+            }
+        } elseif ($chunkType === 'IDAT') {
+            $compressed .= $chunkData;
+        } elseif ($chunkType === 'IEND') {
+            break;
+        }
+    }
+
+    if ($width <= 0 || $height <= 0 || $bitDepth !== 8 || !in_array($colorType, [0, 2, 4, 6], true)) {
+        return null;
+    }
+
+    $decoded = @gzuncompress($compressed);
+    if ($decoded === false && function_exists('zlib_decode')) {
+        $decoded = @zlib_decode($compressed);
+    }
+    if ($decoded === false) {
+        return null;
+    }
+
+    $bytesPerPixel = [0 => 1, 2 => 3, 4 => 2, 6 => 4][$colorType];
+    $rowLength = $width * $bytesPerPixel;
+    $cursor = 0;
+    $previous = array_fill(0, $rowLength, 0);
+    $rgb = '';
+
+    for ($rowIndex = 0; $rowIndex < $height; $rowIndex++) {
+        if ($cursor >= strlen($decoded)) {
+            return null;
+        }
+        $filter = ord($decoded[$cursor++]);
+        $source = substr($decoded, $cursor, $rowLength);
+        $cursor += $rowLength;
+        if (strlen($source) !== $rowLength) {
+            return null;
+        }
+
+        $row = [];
+        for ($i = 0; $i < $rowLength; $i++) {
+            $value = ord($source[$i]);
+            $left = $i >= $bytesPerPixel ? $row[$i - $bytesPerPixel] : 0;
+            $up = $previous[$i] ?? 0;
+            $upperLeft = $i >= $bytesPerPixel ? ($previous[$i - $bytesPerPixel] ?? 0) : 0;
+
+            if ($filter === 1) {
+                $value = ($value + $left) & 255;
+            } elseif ($filter === 2) {
+                $value = ($value + $up) & 255;
+            } elseif ($filter === 3) {
+                $value = ($value + intdiv($left + $up, 2)) & 255;
+            } elseif ($filter === 4) {
+                $value = ($value + clinic_pdf_paeth($left, $up, $upperLeft)) & 255;
+            } elseif ($filter !== 0) {
+                return null;
+            }
+            $row[$i] = $value;
+        }
+
+        for ($pixel = 0; $pixel < $width; $pixel++) {
+            $base = $pixel * $bytesPerPixel;
+            if ($colorType === 0) {
+                $red = $green = $blue = $row[$base];
+                $alpha = 255;
+            } elseif ($colorType === 2) {
+                $red = $row[$base];
+                $green = $row[$base + 1];
+                $blue = $row[$base + 2];
+                $alpha = 255;
+            } elseif ($colorType === 4) {
+                $red = $green = $blue = $row[$base];
+                $alpha = $row[$base + 1];
+            } else {
+                $red = $row[$base];
+                $green = $row[$base + 1];
+                $blue = $row[$base + 2];
+                $alpha = $row[$base + 3];
+            }
+
+            if ($alpha < 255) {
+                $red = (int) round(($red * $alpha + 255 * (255 - $alpha)) / 255);
+                $green = (int) round(($green * $alpha + 255 * (255 - $alpha)) / 255);
+                $blue = (int) round(($blue * $alpha + 255 * (255 - $alpha)) / 255);
+            }
+            $rgb .= chr($red) . chr($green) . chr($blue);
+        }
+        $previous = $row;
+    }
+
+    return [
+        'width' => $width,
+        'height' => $height,
+        'data' => gzcompress($rgb, 9),
+    ];
+}
+
 function clinic_pdf_table_row(array &$ops, float &$y, string $label, string $value, int $maxLines = 4): void {
     $x = 65;
     $labelW = 150;
@@ -91,14 +237,21 @@ function clinic_pdf_table_row(array &$ops, float &$y, string $label, string $val
     $y = $bottom;
 }
 
-function clinic_pdf_build(string $stream): string {
+function clinic_pdf_build(string $stream, ?array $image = null): string {
     $objects = [];
     $objects[] = "<< /Type /Catalog /Pages 2 0 R >>";
     $objects[] = "<< /Type /Pages /Kids [3 0 R] /Count 1 >>";
-    $objects[] = "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R /F2 5 0 R >> >> /Contents 6 0 R >>";
+    $imageResource = $image ? " /XObject << /Im1 7 0 R >>" : '';
+    $objects[] = "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R /F2 5 0 R >>" . $imageResource . " >> /Contents 6 0 R >>";
     $objects[] = "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>";
     $objects[] = "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>";
     $objects[] = "<< /Length " . strlen($stream) . " >>\nstream\n" . $stream . "\nendstream";
+    if ($image) {
+        $objects[] = "<< /Type /XObject /Subtype /Image /Width " . (int) $image['width']
+            . " /Height " . (int) $image['height']
+            . " /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /FlateDecode /Length "
+            . strlen($image['data']) . " >>\nstream\n" . $image['data'] . "\nendstream";
+    }
 
     $pdf = "%PDF-1.4\n";
     $offsets = [0];
@@ -119,20 +272,25 @@ function clinic_pdf_build(string $stream): string {
 
 function clinic_nurse_pdf_output(string $type, array $record): void {
     $ops = [];
+    $logo = clinic_pdf_png_image(__DIR__ . '/../globalife.png');
     clinic_pdf_line($ops, 34, 815, 561, 815, 2.2);
     clinic_pdf_line($ops, 34, 735, 561, 735, 2.2);
 
-    $ops[] = "0.00 0.32 0.68 rg 46 752 58 48 re f";
-    clinic_pdf_text($ops, 63, 772, 18, 'GL', true);
-    clinic_pdf_text($ops, 350, 790, 11, 'Globalife Medical Laboratory & Polyclinic', true);
-    clinic_pdf_text($ops, 378, 774, 10, 'Barangay Sahud Ulan, Tanza, Cavite', true);
-    clinic_pdf_text($ops, 403, 758, 9, 'For authorized clinic use only', true);
+    if ($logo) {
+        $ops[] = "q 58 0 0 58 46 747 cm /Im1 Do Q";
+    } else {
+        $ops[] = "0.08 0.56 0.57 rg 46 752 58 48 re f";
+        clinic_pdf_text($ops, 63, 772, 18, 'GL', true);
+    }
+    clinic_pdf_text($ops, 300, 790, 12, 'Globalife Medical Laboratory & Polyclinic', true);
+    clinic_pdf_text($ops, 376, 774, 9, 'Barangay Sahud Ulan, Tanza, Cavite', true);
+    clinic_pdf_text($ops, 398, 758, 9, 'Professional clinic report', true);
 
-    $documentTitle = $type === 'lab' ? 'Patient Laboratory Result' : 'Patient Medical Record';
-    clinic_pdf_center_text($ops, 680, 18, $documentTitle, true);
-    clinic_pdf_center_text($ops, 658, 10, 'Globalife Medical Laboratory & Polyclinic', true);
+    $documentTitle = $type === 'lab' ? 'LABORATORY REPORT' : 'MEDICAL RECORD';
+    $ops[] = "0.08 0.56 0.57 rg 46 682 503 26 re f";
+    clinic_pdf_white_center_text($ops, 690, 12, $documentTitle);
 
-    $y = 620;
+    $y = 650;
     clinic_pdf_text($ops, 65, $y, 12, 'Patient Information', true);
     $y -= 18;
     clinic_pdf_table_row($ops, $y, 'Name', (string) ($record['patient_name'] ?? 'N/A'), 2);
@@ -162,7 +320,7 @@ function clinic_nurse_pdf_output(string $type, array $record): void {
     clinic_pdf_text($ops, 65, 54, 8, 'Generated by Globalife Clinic System. Keep this document confidential.');
     clinic_pdf_text($ops, 405, 54, 8, 'Generated: ' . date('Y-m-d H:i'));
 
-    $pdf = clinic_pdf_build(implode("\n", $ops));
+    $pdf = clinic_pdf_build(implode("\n", $ops), $logo);
     $safeName = preg_replace('/[^A-Za-z0-9_-]+/', '_', strtolower((string) ($record['patient_name'] ?? 'patient'))) ?: 'patient';
     $fileName = $safeName . '_' . ($type === 'lab' ? 'lab_result' : 'medical_record') . '.pdf';
 

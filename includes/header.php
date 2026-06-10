@@ -28,6 +28,7 @@ if (isLoggedIn()) {
     <link rel="icon" type="image/png" href="favicon.png">
     <link rel="apple-touch-icon" href="globalife.png">
     <link rel="stylesheet" href="main.css">
+    <link rel="stylesheet" href="birthday-picker.css">
     <?php if (isset($additionalHeadLinks)): ?>
         <?php echo $additionalHeadLinks; ?>
     <?php endif; ?>
@@ -103,6 +104,18 @@ if (isLoggedIn()) {
         display: flex;
         align-items: center;
         gap: 8px;
+    }
+    nav.role-nurse {
+        gap: 4px;
+    }
+    nav.role-nurse a {
+        padding-right: 12px;
+        padding-left: 12px;
+        font-size: 0.88rem;
+    }
+    nav.role-nurse .logout-btn {
+        padding-right: 18px;
+        padding-left: 18px;
     }
     nav a {
         color: rgba(255, 255, 255, 0.95);
@@ -303,6 +316,24 @@ if (isLoggedIn()) {
     .mobile-menu-toggle:hover {
         background: rgba(255, 255, 255, 0.1);
     }
+    @media (max-width: 1180px) and (min-width: 901px) {
+        .header-flex:has(nav.role-nurse) {
+            gap: 12px;
+            padding-right: 14px;
+            padding-left: 14px;
+        }
+        .header-flex:has(nav.role-nurse) h1 {
+            font-size: 1.05rem;
+        }
+        nav.role-nurse a {
+            padding: 9px 8px;
+            font-size: 0.8rem;
+        }
+        nav.role-nurse .logout-btn {
+            padding: 9px 14px;
+            font-size: 0.82rem;
+        }
+    }
     @media (max-width: 900px) {
         .mobile-menu-toggle {
             display: block;
@@ -354,15 +385,15 @@ if (isLoggedIn()) {
             </a>
             <?php if (!$headerBrandOnly): ?>
                 <button class="mobile-menu-toggle" onclick="toggleMobileMenu()" aria-label="Open menu">☰</button>
-                <nav id="mainNav">
+                <nav id="mainNav" class="<?php echo isLoggedIn() ? 'role-' . htmlspecialchars((string) $currentUser['role']) : 'role-public'; ?>">
                 <?php if (isLoggedIn()): ?>
                     <?php if ($currentUser['role'] === 'admin'): ?>
                         <a href="admin.php" class="<?php echo basename($_SERVER['PHP_SELF']) === 'admin.php' ? 'active' : ''; ?>">Dashboard</a>
-                        <a href="#">Users</a>
+                        <a href="admin_accounts.php" class="<?php echo basename($_SERVER['PHP_SELF']) === 'admin_accounts.php' ? 'active' : ''; ?>">Accounts</a>
                         <a href="view_appointments.php" class="<?php echo basename($_SERVER['PHP_SELF']) === 'view_appointments.php' ? 'active' : ''; ?>">Appointments</a>
-                        <a href="admin_lab_services.php" class="<?php echo basename($_SERVER['PHP_SELF']) === 'admin_lab_services.php' ? 'active' : ''; ?>">Lab services</a>
-                        <a href="admin_doctors.php" class="<?php echo basename($_SERVER['PHP_SELF']) === 'admin_doctors.php' ? 'active' : ''; ?>">Doctors</a>
-                        <a href="#">Settings</a>
+                        <a href="admin_lab_services.php" class="<?php echo basename($_SERVER['PHP_SELF']) === 'admin_lab_services.php' ? 'active' : ''; ?>">Laboratory Services</a>
+                        <a href="admin_doctors.php" class="<?php echo basename($_SERVER['PHP_SELF']) === 'admin_doctors.php' ? 'active' : ''; ?>">Doctors &amp; Hours</a>
+                        <a href="admin_clinic_setup.php" class="<?php echo basename($_SERVER['PHP_SELF']) === 'admin_clinic_setup.php' ? 'active' : ''; ?>">Settings</a>
                     <?php elseif ($currentUser['role'] === 'doctor'): ?>
                         <a href="view_appointments.php" class="<?php echo basename($_SERVER['PHP_SELF']) === 'view_appointments.php' ? 'active' : ''; ?>">My appointments</a>
                         <a href="nurse_patients.php" class="<?php echo in_array(basename($_SERVER['PHP_SELF']), ['nurse_patients.php', 'nurse_patient.php'], true) ? 'active' : ''; ?>">Patients</a>
@@ -370,13 +401,14 @@ if (isLoggedIn()) {
                         <a href="nurse.php" class="<?php echo basename($_SERVER['PHP_SELF']) === 'nurse.php' ? 'active' : ''; ?>">Dashboard</a>
                         <a href="view_appointments.php" class="<?php echo basename($_SERVER['PHP_SELF']) === 'view_appointments.php' ? 'active' : ''; ?>">Appointments</a>
                         <a href="nurse_patients.php" class="<?php echo in_array(basename($_SERVER['PHP_SELF']), ['nurse_patients.php', 'nurse_patient.php'], true) ? 'active' : ''; ?>">Patients</a>
-                        <a href="nurse_doctors.php" class="<?php echo basename($_SERVER['PHP_SELF']) === 'nurse_doctors.php' ? 'active' : ''; ?>">Doctors</a>
+                        <a href="nurse_medical.php" class="<?php echo basename($_SERVER['PHP_SELF']) === 'nurse_medical.php' ? 'active' : ''; ?>">Medical Records</a>
+                        <a href="nurse_lab.php" class="<?php echo basename($_SERVER['PHP_SELF']) === 'nurse_lab.php' ? 'active' : ''; ?>">Lab Results</a>
                     <?php elseif ($currentUser['role'] === 'receptionist'): ?>
                         <a href="receptionist.php" class="<?php echo basename($_SERVER['PHP_SELF']) === 'receptionist.php' ? 'active' : ''; ?>">Dashboard</a>
                         <a href="view_appointments.php" class="<?php echo basename($_SERVER['PHP_SELF']) === 'view_appointments.php' ? 'active' : ''; ?>">Appointments</a>
                         <a href="register_patient_receptionist.php" class="<?php echo basename($_SERVER['PHP_SELF']) === 'register_patient_receptionist.php' ? 'active' : ''; ?>">Patients</a>
                         <a href="receptionist_doctors.php" class="<?php echo basename($_SERVER['PHP_SELF']) === 'receptionist_doctors.php' ? 'active' : ''; ?>">Doctor schedules</a>
-                        <a href="receptionist_lab_services.php" class="<?php echo basename($_SERVER['PHP_SELF']) === 'receptionist_lab_services.php' ? 'active' : ''; ?>">Lab tests (view)</a>
+                        <a href="receptionist_lab_services.php" class="<?php echo basename($_SERVER['PHP_SELF']) === 'receptionist_lab_services.php' ? 'active' : ''; ?>">Laboratory Services</a>
                     <?php elseif ($currentUser['role'] === 'patient'): ?>
                         <div class="user-info">
                             <?php
@@ -393,7 +425,7 @@ if (isLoggedIn()) {
                         </div>
                         <a href="patients.php" class="<?php echo basename($_SERVER['PHP_SELF']) === 'patients.php' ? 'active' : ''; ?>">Dashboard</a>
                         <a href="view_appointments.php" class="<?php echo basename($_SERVER['PHP_SELF']) === 'view_appointments.php' ? 'active' : ''; ?>">My Appointments</a>
-                        <a href="book_appointment.php" class="<?php echo basename($_SERVER['PHP_SELF']) === 'book_appointment.php' ? 'active' : ''; ?>">Book Appointment</a>
+                        <a href="book_appointment.php?start=1" class="<?php echo basename($_SERVER['PHP_SELF']) === 'book_appointment.php' ? 'active' : ''; ?>">Book Appointment</a>
                         <a href="patient_medical_records.php" class="<?php echo basename($_SERVER['PHP_SELF']) === 'patient_medical_records.php' ? 'active' : ''; ?>">My Clinic Records</a>
                     <?php endif; ?>
                     <form action="logout.php" method="post" style="display:inline;" class="logout-form">

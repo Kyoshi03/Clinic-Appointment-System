@@ -35,6 +35,22 @@ function init_doctor_schema_and_accounts(mysqli $conn): void {
         INDEX idx_user_day (user_id, day_of_week)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
 
+    $conn->query("CREATE TABLE IF NOT EXISTS system_seed_state (
+        seed_key VARCHAR(100) PRIMARY KEY,
+        completed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+    $seedKey = 'default_doctor_accounts_v1';
+    $seedCheck = $conn->prepare('SELECT seed_key FROM system_seed_state WHERE seed_key = ? LIMIT 1');
+    $seedCheck->bind_param('s', $seedKey);
+    $seedCheck->execute();
+    $defaultDoctorsAlreadySeeded = $seedCheck->get_result()->num_rows > 0;
+    $seedCheck->close();
+
+    if ($defaultDoctorsAlreadySeeded) {
+        return;
+    }
+
     $defaultPass = password_hash('password123', PASSWORD_DEFAULT);
     $doctors = [
         [
@@ -102,6 +118,11 @@ function init_doctor_schema_and_accounts(mysqli $conn): void {
         }
         $slotIns->close();
     }
+
+    $seedDone = $conn->prepare('INSERT IGNORE INTO system_seed_state (seed_key) VALUES (?)');
+    $seedDone->bind_param('s', $seedKey);
+    $seedDone->execute();
+    $seedDone->close();
 }
 
 function normalize_booking_time(string $t): string {
@@ -255,4 +276,3 @@ function user_is_doctor_available_at(mysqli $conn, int $userId, string $dateYmd,
     if (!doctor_user_is_active($conn, $userId)) return false;
     return doctor_time_matches_clinic_slot($conn, $userId, $dateYmd, $timeHi);
 }
-

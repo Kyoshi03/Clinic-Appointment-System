@@ -7,6 +7,11 @@ require_once 'includes/session.php';
 require_once 'config/database.php';
 require_once 'includes/mailer.php';
 
+$registrationSource = trim((string) ($_POST['registration_source'] ?? $_GET['source'] ?? ''));
+if ($registrationSource !== 'walkin_qr') {
+    $registrationSource = '';
+}
+
 $error = '';
 $success = '';
 $showPasswordPopup = false;
@@ -47,13 +52,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $emergency_contact_relationship = trim($_POST['emergency_contact_relationship'] ?? '');
     $emergency_contact_number = trim($_POST['emergency_contact_number'] ?? '');
     $agree_clinic_terms = !empty($_POST['agree_clinic_terms']);
+    $fullNameLength = function_exists('mb_strlen') ? mb_strlen($full_name) : strlen($full_name);
+    $todayDate = date('Y-m-d');
+    $birthDateIsValid = false;
     
     // Calculate age from date of birth
     $age = null;
     if (!empty($date_of_birth)) {
-        $dob = new DateTime($date_of_birth);
-        $today = new DateTime();
-        $age = $today->diff($dob)->y;
+        $dob = DateTime::createFromFormat('!Y-m-d', $date_of_birth);
+        $dateErrors = DateTime::getLastErrors();
+        $birthDateIsValid = $dob instanceof DateTime
+            && ($dateErrors === false || ($dateErrors['warning_count'] === 0 && $dateErrors['error_count'] === 0))
+            && $dob->format('Y-m-d') === $date_of_birth;
+        if ($birthDateIsValid && $date_of_birth <= $todayDate) {
+            $today = new DateTime($todayDate);
+            $age = $today->diff($dob)->y;
+        }
     }
     
     // Password validation function
@@ -80,6 +94,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // Validation
     if (empty($full_name) || empty($gender) || empty($date_of_birth) || empty($phone) || empty($email) || empty($barangay) || empty($city) || empty($username) || empty($password) || empty($confirm_password)) {
         $error = 'Please fill in all required fields marked with *.';
+    } elseif ($fullNameLength > 15) {
+        $error = 'Full name must not exceed 15 characters.';
+    } elseif (!$birthDateIsValid) {
+        $error = 'Please enter a valid date of birth.';
+    } elseif ($date_of_birth > $todayDate) {
+        $error = 'Date of birth cannot be a future date.';
     } elseif (!$agree_clinic_terms) {
         $error = 'Please read and agree to the clinic privacy notice before creating your account.';
     } elseif ($password !== $confirm_password) {
@@ -152,6 +172,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         'emergency_contact_name' => $emergency_contact_name,
                         'emergency_contact_relationship' => $emergency_contact_relationship,
                         'emergency_contact_number' => $emergency_contact_number,
+                        'registration_source' => $registrationSource,
                     ],
                     'code_hash' => password_hash($verificationCode, PASSWORD_DEFAULT),
                     'expires_at' => time() + 10 * 60,
@@ -736,6 +757,155 @@ $additionalStyles = '
         line-height: 1.4;
         font-weight: 500;
     }
+    .dob-picker {
+        position: relative;
+    }
+    .dob-picker-button {
+        width: 100%;
+        min-height: 50px;
+        box-sizing: border-box;
+        border: 2px solid #e0e0e0;
+        border-radius: 12px;
+        background: #fff;
+        color: #1f343d;
+        padding: 12px 44px 12px 46px;
+        text-align: left;
+        font: inherit;
+        cursor: pointer;
+    }
+    .dob-picker-button.placeholder {
+        color: #8a9aa3;
+    }
+    .dob-picker-button:focus {
+        outline: none;
+        border-color: #48cae4;
+        box-shadow: 0 0 0 3px rgba(72, 202, 228, 0.12);
+    }
+    .dob-calendar-icon {
+        position: absolute;
+        right: 15px;
+        top: 15px;
+        width: 20px;
+        height: 20px;
+        color: #0077b6;
+        pointer-events: none;
+    }
+    .dob-calendar {
+        display: none;
+        position: fixed;
+        z-index: 1500;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        width: min(340px, calc(100vw - 48px));
+        box-sizing: border-box;
+        border: 1px solid #cfe2ed;
+        border-radius: 12px;
+        background: #fff;
+        padding: 14px;
+        box-shadow: 0 0 0 100vmax rgba(7, 59, 76, 0.45), 0 18px 38px rgba(7, 59, 76, 0.24);
+    }
+    .dob-calendar.open {
+        display: block;
+    }
+    .dob-calendar-controls {
+        display: grid;
+        grid-template-columns: 40px minmax(0, 1fr) 90px 40px;
+        gap: 7px;
+        align-items: center;
+        margin-bottom: 12px;
+    }
+    .dob-calendar-controls button {
+        width: 40px;
+        height: 40px;
+        border: 1px solid #d4e6f1;
+        border-radius: 8px;
+        background: #f5faff;
+        color: #0b4f80;
+        font-size: 1.25rem;
+        cursor: pointer;
+    }
+    .dob-calendar-controls button:disabled {
+        opacity: 0.35;
+        cursor: not-allowed;
+    }
+    .dob-calendar-controls select,
+    .dob-calendar-controls input {
+        width: 100%;
+        min-height: 40px;
+        box-sizing: border-box;
+        border: 1px solid #d4e6f1;
+        border-radius: 8px;
+        background: #fff;
+        color: #073b4c;
+        padding: 7px 9px;
+        font: inherit;
+        font-weight: 700;
+    }
+    .dob-weekdays,
+    .dob-days {
+        display: grid;
+        grid-template-columns: repeat(7, minmax(0, 1fr));
+        gap: 4px;
+    }
+    .dob-weekdays {
+        margin-bottom: 5px;
+        color: #60727d;
+        font-size: 0.72rem;
+        font-weight: 900;
+        text-align: center;
+        text-transform: uppercase;
+    }
+    .dob-weekdays span {
+        padding: 5px 0;
+    }
+    .dob-day,
+    .dob-day-empty {
+        aspect-ratio: 1;
+        min-width: 0;
+    }
+    .dob-day {
+        border: 0;
+        border-radius: 8px;
+        background: #f6f9fb;
+        color: #1f343d;
+        font: inherit;
+        font-size: 0.85rem;
+        font-weight: 700;
+        cursor: pointer;
+    }
+    .dob-day:hover,
+    .dob-day:focus {
+        outline: none;
+        background: #dff3fb;
+        color: #005f91;
+    }
+    .dob-day.selected {
+        background: #0077b6;
+        color: #fff;
+    }
+    .dob-day.today:not(.selected) {
+        box-shadow: inset 0 0 0 2px #48cae4;
+    }
+    .dob-day:disabled {
+        background: #f4f4f4;
+        color: #b4bec4;
+        cursor: not-allowed;
+    }
+    .dob-calendar-footer {
+        display: flex;
+        justify-content: flex-end;
+        margin-top: 10px;
+    }
+    .dob-clear {
+        border: 0;
+        background: transparent;
+        color: #0077b6;
+        padding: 6px;
+        font: inherit;
+        font-weight: 800;
+        cursor: pointer;
+    }
     .terms-box {
         display: flex;
         gap: 12px;
@@ -907,7 +1077,6 @@ $additionalStyles = '
         <div class="login-container">
             <div class="login-header">
                 <img src="globalife.png" alt="Clinic Logo" class="login-logo">
-                <span class="role-badge">Patient</span>
                 <h2>Create Account</h2>
                 <p class="login-subtitle">Register to book appointments and view your clinic records online</p>
             </div>
@@ -934,6 +1103,7 @@ $additionalStyles = '
             
             
             <form method="POST" action="register_patient.php" id="registerForm">
+                <input type="hidden" name="registration_source" value="<?php echo htmlspecialchars($registrationSource); ?>">
                 <!-- Personal Information -->
                 <div class="form-section">
                     <div class="form-section-title">Personal Information</div>
@@ -944,9 +1114,9 @@ $additionalStyles = '
                             <svg class="input-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
                             </svg>
-                            <input type="text" id="full_name" name="full_name" placeholder="Enter your full name" required autofocus value="<?php echo (!empty($success) ? '' : (isset($_POST['full_name']) ? htmlspecialchars($_POST['full_name']) : '')); ?>">
+                            <input type="text" id="full_name" name="full_name" placeholder="Enter your full name" maxlength="15" required autofocus value="<?php echo (!empty($success) ? '' : (isset($_POST['full_name']) ? htmlspecialchars($_POST['full_name']) : '')); ?>">
                         </div>
-                        <span class="field-hint">Use your complete name as it appears on clinic records or valid ID.</span>
+                        <span class="field-hint">Maximum of 15 characters. <span id="fullNameCounter">0/15</span></span>
                     </div>
                     
                     <div class="form-row">
@@ -967,12 +1137,37 @@ $additionalStyles = '
                         
                         <div class="form-group">
                             <label for="date_of_birth">Date of Birth (DOB)</label>
-                            <div class="input-wrapper">
+                            <div class="input-wrapper dob-picker" id="dobPicker">
                                 <svg class="input-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
                                 </svg>
-                                <input type="date" id="date_of_birth" name="date_of_birth" required value="<?php echo (!empty($success) ? '' : (isset($_POST['date_of_birth']) ? htmlspecialchars($_POST['date_of_birth']) : '')); ?>">
+                                <input type="hidden" id="date_of_birth" name="date_of_birth" value="<?php echo (!empty($success) ? '' : (isset($_POST['date_of_birth']) ? htmlspecialchars($_POST['date_of_birth']) : '')); ?>">
+                                <button type="button" class="dob-picker-button placeholder" id="dobPickerButton" aria-haspopup="dialog" aria-expanded="false">Select birthday</button>
+                                <svg class="dob-calendar-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                                </svg>
+                                <div class="dob-calendar" id="dobCalendar" role="dialog" aria-label="Choose date of birth">
+                                    <div class="dob-calendar-controls">
+                                        <button type="button" id="dobPreviousMonth" aria-label="Previous month">&lsaquo;</button>
+                                        <select id="dobMonth" aria-label="Birth month">
+                                            <option value="0">January</option><option value="1">February</option><option value="2">March</option>
+                                            <option value="3">April</option><option value="4">May</option><option value="5">June</option>
+                                            <option value="6">July</option><option value="7">August</option><option value="8">September</option>
+                                            <option value="9">October</option><option value="10">November</option><option value="11">December</option>
+                                        </select>
+                                        <input type="number" id="dobYear" min="1900" max="<?php echo date('Y'); ?>" inputmode="numeric" aria-label="Birth year">
+                                        <button type="button" id="dobNextMonth" aria-label="Next month">&rsaquo;</button>
+                                    </div>
+                                    <div class="dob-weekdays" aria-hidden="true">
+                                        <span>Sun</span><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span>
+                                    </div>
+                                    <div class="dob-days" id="dobDays"></div>
+                                    <div class="dob-calendar-footer">
+                                        <button type="button" class="dob-clear" id="dobClear">Clear date</button>
+                                    </div>
+                                </div>
                             </div>
+                            <span class="field-hint">Future dates are not allowed.</span>
                         </div>
                     </div>
                     
@@ -1370,13 +1565,221 @@ $additionalStyles = '
             const confirmPasswordInput = document.getElementById('confirm_password');
             const passwordToggle = document.getElementById('passwordToggle');
             const confirmPasswordToggle = document.getElementById('confirmPasswordToggle');
+            const fullNameInput = document.getElementById('full_name');
+            const fullNameCounter = document.getElementById('fullNameCounter');
             const dateOfBirthInput = document.getElementById('date_of_birth');
+            const dobPicker = document.getElementById('dobPicker');
+            const dobPickerButton = document.getElementById('dobPickerButton');
+            const dobCalendar = document.getElementById('dobCalendar');
+            const dobMonth = document.getElementById('dobMonth');
+            const dobYear = document.getElementById('dobYear');
+            const dobDays = document.getElementById('dobDays');
+            const dobPreviousMonth = document.getElementById('dobPreviousMonth');
+            const dobNextMonth = document.getElementById('dobNextMonth');
+            const dobClear = document.getElementById('dobClear');
             const ageInput = document.getElementById('age');
             const ageDisplay = document.getElementById('ageDisplay');
+            const todayDate = new Date();
+            todayDate.setHours(0, 0, 0, 0);
+            const todayYmd = [
+                todayDate.getFullYear(),
+                String(todayDate.getMonth() + 1).padStart(2, '0'),
+                String(todayDate.getDate()).padStart(2, '0')
+            ].join('-');
+            let selectedBirthDate = null;
+            let calendarMonth = todayDate.getMonth();
+            let calendarYear = todayDate.getFullYear();
+
+            function updateFullNameCounter() {
+                if (!fullNameInput || !fullNameCounter) return;
+                fullNameCounter.textContent = fullNameInput.value.length + '/15';
+            }
+
+            if (fullNameInput) {
+                fullNameInput.addEventListener('input', updateFullNameCounter);
+                updateFullNameCounter();
+            }
+
+            function parseYmd(value) {
+                const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value || '');
+                if (!match) return null;
+                const parsed = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+                parsed.setHours(0, 0, 0, 0);
+                return parsed.getFullYear() === Number(match[1])
+                    && parsed.getMonth() === Number(match[2]) - 1
+                    && parsed.getDate() === Number(match[3])
+                    ? parsed
+                    : null;
+            }
+
+            function dateToYmd(date) {
+                return [
+                    date.getFullYear(),
+                    String(date.getMonth() + 1).padStart(2, '0'),
+                    String(date.getDate()).padStart(2, '0')
+                ].join('-');
+            }
+
+            function birthDateLabel(date) {
+                return date.toLocaleDateString('en-US', {
+                    month: 'long',
+                    day: 'numeric',
+                    year: 'numeric'
+                });
+            }
+
+            function updateBirthDateButton() {
+                if (!dobPickerButton) return;
+                if (selectedBirthDate) {
+                    dobPickerButton.textContent = birthDateLabel(selectedBirthDate);
+                    dobPickerButton.classList.remove('placeholder');
+                } else {
+                    dobPickerButton.textContent = 'Select birthday';
+                    dobPickerButton.classList.add('placeholder');
+                }
+            }
+
+            function renderBirthCalendar() {
+                if (!dobDays || !dobMonth || !dobYear) return;
+                calendarYear = Math.min(todayDate.getFullYear(), Math.max(1900, Number(calendarYear) || todayDate.getFullYear()));
+                if (calendarYear === todayDate.getFullYear() && calendarMonth > todayDate.getMonth()) {
+                    calendarMonth = todayDate.getMonth();
+                }
+                dobMonth.value = String(calendarMonth);
+                dobYear.value = String(calendarYear);
+                dobDays.innerHTML = '';
+
+                const firstWeekday = new Date(calendarYear, calendarMonth, 1).getDay();
+                const daysInMonth = new Date(calendarYear, calendarMonth + 1, 0).getDate();
+                for (let blank = 0; blank < firstWeekday; blank++) {
+                    const empty = document.createElement('span');
+                    empty.className = 'dob-day-empty';
+                    dobDays.appendChild(empty);
+                }
+
+                for (let day = 1; day <= daysInMonth; day++) {
+                    const date = new Date(calendarYear, calendarMonth, day);
+                    date.setHours(0, 0, 0, 0);
+                    const button = document.createElement('button');
+                    button.type = 'button';
+                    button.className = 'dob-day';
+                    button.textContent = String(day);
+                    button.disabled = date > todayDate;
+                    if (dateToYmd(date) === todayYmd) button.classList.add('today');
+                    if (selectedBirthDate && dateToYmd(date) === dateToYmd(selectedBirthDate)) {
+                        button.classList.add('selected');
+                    }
+                    button.addEventListener('click', function () {
+                        selectedBirthDate = date;
+                        dateOfBirthInput.value = dateToYmd(date);
+                        dateOfBirthInput.setCustomValidity('');
+                        updateBirthDateButton();
+                        calculateAge();
+                        closeBirthCalendar();
+                    });
+                    dobDays.appendChild(button);
+                }
+
+                if (dobPreviousMonth) {
+                    dobPreviousMonth.disabled = calendarYear === 1900 && calendarMonth === 0;
+                }
+                if (dobNextMonth) {
+                    dobNextMonth.disabled = calendarYear === todayDate.getFullYear()
+                        && calendarMonth === todayDate.getMonth();
+                }
+            }
+
+            function openBirthCalendar() {
+                if (!dobCalendar || !dobPickerButton) return;
+                dobCalendar.classList.add('open');
+                dobPickerButton.setAttribute('aria-expanded', 'true');
+                document.body.style.overflow = 'hidden';
+                renderBirthCalendar();
+            }
+
+            function closeBirthCalendar() {
+                if (!dobCalendar || !dobPickerButton) return;
+                dobCalendar.classList.remove('open');
+                dobPickerButton.setAttribute('aria-expanded', 'false');
+                document.body.style.overflow = '';
+            }
+
+            selectedBirthDate = parseYmd(dateOfBirthInput.value);
+            if (selectedBirthDate) {
+                calendarMonth = selectedBirthDate.getMonth();
+                calendarYear = selectedBirthDate.getFullYear();
+            }
+            updateBirthDateButton();
+
+            if (dobPickerButton) {
+                dobPickerButton.addEventListener('click', function () {
+                    if (dobCalendar.classList.contains('open')) {
+                        closeBirthCalendar();
+                    } else {
+                        openBirthCalendar();
+                    }
+                });
+            }
+            if (dobMonth) {
+                dobMonth.addEventListener('change', function () {
+                    calendarMonth = Number(dobMonth.value);
+                    renderBirthCalendar();
+                });
+            }
+            if (dobYear) {
+                dobYear.addEventListener('change', function () {
+                    calendarYear = Number(dobYear.value);
+                    renderBirthCalendar();
+                });
+            }
+            if (dobPreviousMonth) {
+                dobPreviousMonth.addEventListener('click', function () {
+                    calendarMonth--;
+                    if (calendarMonth < 0) {
+                        calendarMonth = 11;
+                        calendarYear--;
+                    }
+                    renderBirthCalendar();
+                });
+            }
+            if (dobNextMonth) {
+                dobNextMonth.addEventListener('click', function () {
+                    calendarMonth++;
+                    if (calendarMonth > 11) {
+                        calendarMonth = 0;
+                        calendarYear++;
+                    }
+                    renderBirthCalendar();
+                });
+            }
+            if (dobClear) {
+                dobClear.addEventListener('click', function () {
+                    selectedBirthDate = null;
+                    dateOfBirthInput.value = '';
+                    updateBirthDateButton();
+                    calculateAge();
+                    closeBirthCalendar();
+                });
+            }
+            document.addEventListener('click', function (event) {
+                if (dobPicker && !dobPicker.contains(event.target)) {
+                    closeBirthCalendar();
+                }
+            });
+            document.addEventListener('keydown', function (event) {
+                if (event.key === 'Escape') closeBirthCalendar();
+            });
             
             // Calculate age from date of birth
             function calculateAge() {
                 if (dateOfBirthInput.value) {
+                    if (dateOfBirthInput.value > todayYmd) {
+                        dateOfBirthInput.setCustomValidity('Date of birth cannot be a future date.');
+                        ageInput.value = '';
+                        ageDisplay.style.display = 'none';
+                        return;
+                    }
+                    dateOfBirthInput.setCustomValidity('');
                     const dob = new Date(dateOfBirthInput.value);
                     const today = new Date();
                     let age = today.getFullYear() - dob.getFullYear();
@@ -1388,6 +1791,7 @@ $additionalStyles = '
                     ageDisplay.textContent = age + ' years old';
                     ageDisplay.style.display = 'inline-block';
                 } else {
+                    dateOfBirthInput.setCustomValidity('');
                     ageInput.value = '';
                     ageDisplay.style.display = 'none';
                 }
@@ -1513,6 +1917,13 @@ $additionalStyles = '
             // Form validation
             const form = document.getElementById('registerForm');
             form.addEventListener('submit', function(e) {
+                if (!dateOfBirthInput.value) {
+                    e.preventDefault();
+                    dateOfBirthInput.setCustomValidity('Please select your date of birth.');
+                    openBirthCalendar();
+                    dobPickerButton.focus();
+                    return false;
+                }
                 const reqs = validatePasswordRequirements(passwordInput.value);
                 const allValid = Object.values(reqs).every(v => v === true);
                 
@@ -1542,5 +1953,3 @@ $additionalStyles = '
     </script>
 </body>
 </html>
-
-

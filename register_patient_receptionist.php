@@ -29,7 +29,7 @@ function rpr_password_requirements(string $password): array {
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $full_name = trim($_POST['full_name'] ?? '');
     $gender = $_POST['gender'] ?? '';
-    $date_of_birth = $_POST['date_of_birth'] ?? '';
+    $date_of_birth = trim($_POST['date_of_birth'] ?? '');
     $civil_status = trim($_POST['civil_status'] ?? '');
     $phone = trim($_POST['phone'] ?? '');
     $email = trim($_POST['email'] ?? '');
@@ -43,17 +43,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $emergency_contact_relationship = trim($_POST['emergency_contact_relationship'] ?? '');
     $emergency_contact_number = trim($_POST['emergency_contact_number'] ?? '');
     
-    // Calculate age from date of birth
+    $birthDate = null;
+    $birthDateIsValid = false;
+    if ($date_of_birth !== '') {
+        $birthDate = DateTime::createFromFormat('!Y-m-d', $date_of_birth);
+        $birthDateErrors = DateTime::getLastErrors();
+        $birthDateIsValid = $birthDate instanceof DateTime
+            && ($birthDateErrors === false || ($birthDateErrors['warning_count'] === 0 && $birthDateErrors['error_count'] === 0))
+            && $birthDate->format('Y-m-d') === $date_of_birth;
+    }
+
     $age = null;
-    if (!empty($date_of_birth)) {
-        $dob = new DateTime($date_of_birth);
-        $today = new DateTime();
-        $age = $today->diff($dob)->y;
+    if ($birthDateIsValid && $birthDate <= new DateTime('today')) {
+        $age = (new DateTime('today'))->diff($birthDate)->y;
     }
     
     // Validation
     if (empty($full_name) || empty($gender) || empty($date_of_birth) || empty($phone) || empty($email) || empty($barangay) || empty($city) || empty($username) || empty($password) || empty($confirm_password)) {
         $error = 'Please fill in all required fields.';
+    } elseif (!$birthDateIsValid) {
+        $error = 'Please enter a valid date of birth.';
+    } elseif ($birthDate > new DateTime('today')) {
+        $error = 'Date of birth cannot be a future date.';
     } elseif ($password !== $confirm_password) {
         $error = 'Password and confirm password do not match.';
     } elseif (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
@@ -104,6 +115,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 $pageTitle = "Register New Patient | Globalife Medical Laboratory & Polyclinic";
+$requestScheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+$requestHost = (string) ($_SERVER['HTTP_HOST'] ?? 'globalife.online');
+$requestDirectory = str_replace('\\', '/', dirname((string) ($_SERVER['SCRIPT_NAME'] ?? '/')));
+$requestDirectory = $requestDirectory === '/' ? '' : rtrim($requestDirectory, '/');
+$walkInRegistrationUrl = $requestScheme . '://' . $requestHost . $requestDirectory . '/register_patient.php?source=walkin_qr';
+$walkInQrImageUrl = 'https://api.qrserver.com/v1/create-qr-code/?size=300x300&margin=12&data=' . rawurlencode($walkInRegistrationUrl);
 $additionalStyles = '
     body {
         background:
@@ -428,53 +445,209 @@ $additionalStyles = '
         transform: translateY(-1px);
         box-shadow: 0 12px 24px rgba(15, 124, 194, 0.24);
     }
-    .summary-card {
-        border: 1px solid #dce8f1;
+    .qr-action-card {
+        border: 1px solid #cfe4f1;
         border-radius: 16px;
-        padding: 14px;
-        background: linear-gradient(180deg, #fbfdff 0%, #f4f9fd 100%);
-        margin-bottom: 10px;
+        padding: 16px;
+        background: #f5fbff;
+        margin-bottom: 12px;
     }
-    .summary-card h3 {
+    .qr-action-card h3 {
         margin: 0 0 6px;
         color: #073b4c;
         font-size: 1rem;
     }
-    .summary-card p {
-        margin: 0;
+    .qr-action-card p {
+        margin: 0 0 12px;
         color: #60727d;
-        font-size: 0.84rem;
-        line-height: 1.4;
-    }
-    .summary-caption {
-        margin: 0 0 14px;
-        color: #5d7280;
         font-size: 0.84rem;
         line-height: 1.5;
     }
-    .summary-list {
-        display: grid;
-        gap: 10px;
-        margin-top: 0;
-    }
-    .summary-item {
-        border: 1px solid #dde8f1;
-        border-radius: 16px;
-        padding: 12px 13px;
-        background: #fff;
-    }
-    .summary-item span {
-        display: block;
-        color: #60727d;
-        font-size: 0.68rem;
-        text-transform: uppercase;
+    .qr-open-btn {
+        width: 100%;
+        min-height: 44px;
+        border: 0;
+        border-radius: 10px;
+        background: #0f7cc2;
+        color: #fff;
+        padding: 10px 14px;
+        font: inherit;
+        font-size: 0.9rem;
         font-weight: 900;
+        cursor: pointer;
+        transition: background 0.2s ease, transform 0.2s ease;
     }
-    .summary-item strong {
-        display: block;
-        margin-top: 4px;
+    .qr-open-btn:hover {
+        background: #0b5f96;
+        transform: translateY(-1px);
+    }
+    .qr-modal-overlay {
+        display: none;
+        position: fixed;
+        inset: 0;
+        z-index: 2500;
+        place-items: center;
+        padding: 18px;
+        background: rgba(7, 59, 76, 0.58);
+    }
+    .qr-modal-overlay.active {
+        display: grid;
+    }
+    .qr-modal {
+        width: min(430px, 100%);
+        box-sizing: border-box;
+        border-radius: 16px;
+        background: #fff;
+        padding: 20px;
+        box-shadow: 0 24px 60px rgba(7, 59, 76, 0.28);
+        text-align: center;
+    }
+    .qr-modal-head {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 12px;
+        text-align: left;
+        margin-bottom: 14px;
+    }
+    .qr-modal-head h3 {
+        margin: 0 0 4px;
         color: #073b4c;
+        font-size: 1.2rem;
+    }
+    .qr-modal-head p {
+        margin: 0;
+        color: #60727d;
         font-size: 0.84rem;
+        line-height: 1.45;
+    }
+    .qr-modal-close {
+        width: 36px;
+        height: 36px;
+        flex: 0 0 36px;
+        border: 0;
+        border-radius: 8px;
+        background: #edf6fc;
+        color: #0b4f80;
+        font-size: 1.35rem;
+        cursor: pointer;
+    }
+    .qr-code-frame {
+        display: inline-grid;
+        place-items: center;
+        border: 1px solid #d5e6f0;
+        border-radius: 12px;
+        background: #fff;
+        padding: 10px;
+    }
+    .qr-code-frame img {
+        display: block;
+        width: min(250px, 64vw);
+        height: auto;
+        aspect-ratio: 1;
+    }
+    .qr-modal-note {
+        margin: 12px 0;
+        color: #526b78;
+        font-size: 0.86rem;
+        line-height: 1.5;
+    }
+    .qr-page-link {
+        display: block;
+        width: 100%;
+        border: 0;
+        border-radius: 10px;
+        background: #073b4c;
+        color: #fff;
+        padding: 11px 14px;
+        font: inherit;
+        font-weight: 900;
+        cursor: pointer;
+    }
+    .qr-print-brand {
+        display: none;
+    }
+    @media print {
+        @page {
+            size: A4 portrait;
+            margin: 14mm;
+        }
+        body * {
+            visibility: hidden !important;
+        }
+        #walkInQrModal,
+        #walkInQrModal * {
+            visibility: visible !important;
+        }
+        #walkInQrModal {
+            display: block !important;
+            position: absolute;
+            inset: 0;
+            padding: 0;
+            background: #fff;
+        }
+        #walkInQrModal .qr-modal {
+            width: 100%;
+            max-width: none;
+            min-height: 250mm;
+            border: 2px solid #0f7cc2;
+            border-radius: 12px;
+            box-shadow: none;
+            padding: 20mm 16mm;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+        .qr-print-brand {
+            display: grid;
+            justify-items: center;
+            gap: 8px;
+            margin-bottom: 16px;
+        }
+        .qr-print-brand img {
+            width: 78px;
+            height: 78px;
+            border-radius: 50%;
+            object-fit: cover;
+            border: 3px solid #48cae4;
+        }
+        .qr-print-brand strong {
+            color: #073b4c;
+            font-size: 18pt;
+            text-align: center;
+        }
+        .qr-modal-head {
+            display: block;
+            text-align: center;
+            margin-bottom: 16px;
+        }
+        .qr-modal-head h3 {
+            font-size: 28pt;
+            text-transform: uppercase;
+        }
+        .qr-modal-head p {
+            font-size: 13pt;
+        }
+        .qr-modal-close,
+        .qr-page-link {
+            display: none !important;
+        }
+        .qr-code-frame {
+            border: 0;
+            padding: 8px;
+        }
+        .qr-code-frame img {
+            width: 105mm;
+            height: 105mm;
+            max-width: none;
+        }
+        .qr-modal-note {
+            max-width: 150mm;
+            color: #073b4c;
+            font-size: 13pt;
+            font-weight: 700;
+        }
     }
     .summary-steps {
         margin-top: 12px;
@@ -639,7 +812,7 @@ include 'includes/header.php';
 
                             <div class="form-group">
                                 <label for="date_of_birth">Date of birth <span class="required">*</span></label>
-                                <input type="date" id="date_of_birth" name="date_of_birth" required max="<?php echo date('Y-m-d'); ?>" value="<?php echo rpr_value('date_of_birth'); ?>">
+                                <input type="date" id="date_of_birth" name="date_of_birth" required data-birthday-picker max="<?php echo date('Y-m-d'); ?>" value="<?php echo rpr_value('date_of_birth'); ?>">
                             </div>
                         </div>
 
@@ -804,24 +977,11 @@ include 'includes/header.php';
                 </form>
             </div>
 
-            <aside class="summary-panel" aria-label="Intake summary">
-                <div class="summary-card">
-                    <h3>Quick guide</h3>
-                    <p class="summary-caption">This side panel stays focused on what the receptionist usually needs while encoding a walk-in patient.</p>
-                </div>
-                <div class="summary-list">
-                    <div class="summary-item">
-                        <span>Required</span>
-                        <strong>Name, gender, birthday, phone, email, barangay, city, username, password</strong>
-                    </div>
-                    <div class="summary-item">
-                        <span>Optional but helpful</span>
-                        <strong>Street address and emergency contact details</strong>
-                    </div>
-                    <div class="summary-item">
-                        <span>Tip</span>
-                        <strong>Use a temporary password the patient can change later.</strong>
-                    </div>
+            <aside class="summary-panel" aria-label="Walk-in registration options">
+                <div class="qr-action-card">
+                    <h3>Patient self-registration</h3>
+                    <p>Let the walk-in patient register using their own phone instead of encoding the form at the desk.</p>
+                    <button type="button" class="qr-open-btn" id="openWalkInQr">Show scan code</button>
                 </div>
                 <div class="summary-steps">
                     <h4>Reception flow</h4>
@@ -843,8 +1003,68 @@ include 'includes/header.php';
     </div>
 </div>
 
+<div class="qr-modal-overlay" id="walkInQrModal" role="dialog" aria-modal="true" aria-labelledby="walkInQrTitle" aria-hidden="true">
+    <div class="qr-modal">
+        <div class="qr-print-brand">
+            <img src="globalife.png" alt="Globalife Medical Laboratory and Polyclinic logo">
+            <strong>Globalife Medical Laboratory &amp; Polyclinic</strong>
+        </div>
+        <div class="qr-modal-head">
+            <div>
+                <h3 id="walkInQrTitle">Scan to register</h3>
+                <p>Use the patient&apos;s phone camera to open the official registration page.</p>
+            </div>
+            <button type="button" class="qr-modal-close" id="closeWalkInQr" aria-label="Close">&times;</button>
+        </div>
+        <div class="qr-code-frame">
+            <img src="<?php echo htmlspecialchars($walkInQrImageUrl); ?>" alt="QR code for patient registration" width="250" height="250">
+        </div>
+        <p class="qr-modal-note">After email verification, the administrator will receive a new patient account notification.</p>
+        <button type="button" class="qr-page-link" id="printWalkInQr">Print / Save as PDF</button>
+    </div>
+</div>
+
 <script>
 document.addEventListener('DOMContentLoaded', function () {
+    const walkInQrModal = document.getElementById('walkInQrModal');
+    const openWalkInQr = document.getElementById('openWalkInQr');
+    const closeWalkInQr = document.getElementById('closeWalkInQr');
+    const printWalkInQr = document.getElementById('printWalkInQr');
+
+    function openQrModal() {
+        if (!walkInQrModal) return;
+        walkInQrModal.classList.add('active');
+        walkInQrModal.setAttribute('aria-hidden', 'false');
+        document.body.style.overflow = 'hidden';
+        if (closeWalkInQr) closeWalkInQr.focus();
+    }
+
+    function closeQrModal() {
+        if (!walkInQrModal) return;
+        walkInQrModal.classList.remove('active');
+        walkInQrModal.setAttribute('aria-hidden', 'true');
+        document.body.style.overflow = '';
+        if (openWalkInQr) openWalkInQr.focus();
+    }
+
+    if (openWalkInQr) openWalkInQr.addEventListener('click', openQrModal);
+    if (closeWalkInQr) closeWalkInQr.addEventListener('click', closeQrModal);
+    if (printWalkInQr) {
+        printWalkInQr.addEventListener('click', function () {
+            window.print();
+        });
+    }
+    if (walkInQrModal) {
+        walkInQrModal.addEventListener('click', function (event) {
+            if (event.target === walkInQrModal) closeQrModal();
+        });
+    }
+    document.addEventListener('keydown', function (event) {
+        if (event.key === 'Escape' && walkInQrModal && walkInQrModal.classList.contains('active')) {
+            closeQrModal();
+        }
+    });
+
     const passwordInput = document.getElementById('password');
     const confirmPasswordInput = document.getElementById('confirm_password');
     const passwordToggle = document.getElementById('passwordToggle');
@@ -961,9 +1181,4 @@ document.addEventListener('DOMContentLoaded', function () {
 </script>
 
 <?php include 'includes/footer.php'; ?>
-
-
-
-
-
 

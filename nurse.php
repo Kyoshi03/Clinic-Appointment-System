@@ -139,20 +139,6 @@ if ($patientResult && ($row = $patientResult->fetch_assoc())) {
     $patientCount = (int) $row['total'];
 }
 
-$doctorCount = 0;
-$doctorActiveCount = 0;
-$doctorInactiveCount = 0;
-$doctorStats = $conn->query("SELECT
-    COUNT(*) AS total,
-    SUM(CASE WHEN COALESCE(is_active, 1) = 1 THEN 1 ELSE 0 END) AS active_count,
-    SUM(CASE WHEN COALESCE(is_active, 1) = 0 THEN 1 ELSE 0 END) AS inactive_count
-    FROM users WHERE role = 'doctor'");
-if ($doctorStats && ($row = $doctorStats->fetch_assoc())) {
-    $doctorCount = (int) ($row['total'] ?? 0);
-    $doctorActiveCount = (int) ($row['active_count'] ?? 0);
-    $doctorInactiveCount = (int) ($row['inactive_count'] ?? 0);
-}
-
 $todayRecordCount = 0;
 $recordCountStmt = $conn->prepare('SELECT COUNT(*) AS total FROM medical_records WHERE DATE(created_at) = ?');
 $recordCountStmt->bind_param('s', $today);
@@ -187,6 +173,11 @@ body {
     max-width: 1180px;
     margin: 0 auto;
     padding: 28px 20px 46px;
+}
+
+.nurse-dashboard > section {
+    padding-top: 0;
+    padding-bottom: 0;
 }
 
 .nurse-hero {
@@ -289,7 +280,7 @@ body {
 
 .metrics-grid {
     display: grid;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 12px;
     margin-bottom: 16px;
 }
@@ -330,8 +321,9 @@ body {
 
 .workbench-grid {
     display: grid;
-    grid-template-columns: minmax(0, 0.88fr) minmax(0, 1.12fr);
+    grid-template-columns: minmax(320px, 0.72fr) minmax(0, 1.28fr);
     gap: 16px;
+    align-items: start;
     margin-bottom: 16px;
 }
 
@@ -398,6 +390,46 @@ body {
     margin-bottom: 14px;
 }
 
+.lookup-scroll,
+.queue-scroll {
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+    scrollbar-color: #9fc5d8 #edf5f8;
+}
+
+.lookup-scroll {
+    max-height: 510px;
+    padding-right: 5px;
+}
+
+.queue-scroll {
+    max-height: 520px;
+    padding-right: 7px;
+}
+
+.lookup-scroll::-webkit-scrollbar,
+.queue-scroll::-webkit-scrollbar {
+    width: 8px;
+}
+
+.lookup-scroll::-webkit-scrollbar-track,
+.queue-scroll::-webkit-scrollbar-track {
+    background: #edf5f8;
+    border-radius: 999px;
+}
+
+.lookup-scroll::-webkit-scrollbar-thumb,
+.queue-scroll::-webkit-scrollbar-thumb {
+    background: #9fc5d8;
+    border-radius: 999px;
+}
+
+.lookup-scroll::-webkit-scrollbar-thumb:hover,
+.queue-scroll::-webkit-scrollbar-thumb:hover {
+    background: #75aac3;
+}
+
 input,
 select {
     width: 100%;
@@ -423,14 +455,32 @@ select:focus {
     display: inline-flex;
     align-items: center;
     justify-content: center;
+    box-sizing: border-box;
     min-height: 38px;
     border: 1px solid transparent;
     border-radius: 8px;
     padding: 8px 13px;
     cursor: pointer;
+    font: inherit;
+    font-size: 0.92rem;
     font-weight: 900;
+    line-height: 1.15;
     text-decoration: none;
+    text-align: center;
+    white-space: nowrap;
     transition: background 0.2s ease, transform 0.2s ease, border-color 0.2s ease;
+}
+
+.btn {
+    min-width: 104px;
+}
+
+.patient-search .btn {
+    min-width: 92px;
+}
+
+.panel-head > .btn {
+    min-width: 150px;
 }
 
 .btn:hover,
@@ -577,6 +627,28 @@ select:focus {
     gap: 8px;
 }
 
+.queue-actions form {
+    display: contents;
+    margin: 0;
+}
+
+.queue-actions .btn {
+    min-height: 40px;
+}
+
+.next-card .queue-actions .btn {
+    flex: 1 1 104px;
+}
+
+.patient-queue-panel .queue-row {
+    grid-template-columns: 76px auto minmax(0, 1fr);
+}
+
+.patient-queue-panel .queue-actions {
+    grid-column: 1 / -1;
+    padding-top: 2px;
+}
+
 .empty-state {
     border: 1px dashed #bdd7ea;
     border-radius: 8px;
@@ -630,8 +702,6 @@ select:focus {
 .qa-medical .qa-icon { background: linear-gradient(135deg, #0077b6, #023e8a); }
 .qa-lab .qa-icon { background: linear-gradient(135deg, #2a9d8f, #1d6f63); }
 .qa-patients .qa-icon { background: linear-gradient(135deg, #e76f51, #c44532); }
-.qa-doctors .qa-icon { background: linear-gradient(135deg, #6a4c93, #4a3468); }
-
 .qa-card strong {
     display: block;
     color: #073b4c;
@@ -655,46 +725,6 @@ select:focus {
 .metric-card.clickable:hover {
     transform: translateY(-2px);
     box-shadow: 0 14px 28px rgba(25, 76, 110, 0.1);
-}
-
-.metric-card.doctors-metric {
-    border-color: #d4c4e8;
-    background: #f9f6fc;
-}
-
-.metric-card.doctors-metric:hover {
-    border-color: #6a4c93;
-}
-
-.doctor-metric-split {
-    display: flex;
-    gap: 16px;
-    margin: 6px 0 4px;
-}
-
-.doctor-metric-split > span {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    font-size: 0.78rem;
-    font-weight: 700;
-    color: #60727d;
-    text-transform: uppercase;
-    letter-spacing: 0.03em;
-}
-
-.doctor-metric-split strong {
-    font-size: 1.65rem;
-    line-height: 1;
-    letter-spacing: -0.02em;
-}
-
-.doctor-metric-split .active-num strong {
-    color: #17643a;
-}
-
-.doctor-metric-split .inactive-num strong {
-    color: #9d1c2c;
 }
 
 .hero-actions {
@@ -810,6 +840,11 @@ select:focus {
         justify-content: stretch;
     }
 
+    .lookup-scroll,
+    .queue-scroll {
+        max-height: 430px;
+    }
+
     .btn {
         width: 100%;
     }
@@ -897,19 +932,11 @@ include 'includes/header.php';
             <strong><?php echo $todayLabCount; ?></strong>
             <small>Created today</small>
         </a>
-        <a class="metric-card doctors-metric clickable" href="nurse_doctors.php">
-            <span>Provider status</span>
-            <div class="doctor-metric-split">
-                <span class="active-num"><strong><?php echo $doctorActiveCount; ?></strong> Active</span>
-                <span class="inactive-num"><strong><?php echo $doctorInactiveCount; ?></strong> Inactive</span>
-            </div>
-            <small><?php echo $doctorCount; ?> total provider accounts</small>
-        </a>
     </section>
 
 
     <section class="workbench-grid">
-        <div class="panel">
+        <div class="panel lookup-panel">
             <div class="panel-head">
                 <div>
                     <h2>Patient lookup</h2>
@@ -921,173 +948,145 @@ include 'includes/header.php';
                 <button class="btn primary" type="submit">Search</button>
             </form>
 
-            <div class="panel-head" style="margin-top:18px">
-                <div>
-                    <h2>Next patient</h2>
-                    <p>Current queue priority</p>
+            <div class="lookup-scroll">
+                <div class="panel-head" style="margin-top:4px">
+                    <div>
+                        <h2>Next patient</h2>
+                        <p>Current queue priority</p>
+                    </div>
+                    <?php if ($nextPatient): ?>
+                        <span class="status-badge <?php echo nurse_status($nextPatient); ?>">
+                            <?php echo htmlspecialchars($nextPatient['status_label']); ?>
+                        </span>
+                    <?php endif; ?>
                 </div>
+
                 <?php if ($nextPatient): ?>
-                    <span class="status-badge <?php echo nurse_status($nextPatient); ?>">
-                        <?php echo htmlspecialchars($nextPatient['status_label']); ?>
-                    </span>
-                <?php endif; ?>
-            </div>
-
-            <?php if ($nextPatient): ?>
-                <div class="next-card">
-                    <div style="margin-bottom:12px"><?php echo renderPatientAvatarWithName($nextPatient, ['size' => 'lg', 'link' => true, 'link_target' => 'nurse', 'patient_id' => (int) $nextPatient['patient_id']]); ?></div>
-                    <div class="detail-grid">
-                        <div class="detail-pill">
-                            <span>Date</span>
-                            <strong><?php echo htmlspecialchars(nurse_date_label($nextPatient['appointment_date'])); ?></strong>
-                        </div>
-                        <div class="detail-pill">
-                            <span>Queue note</span>
-                            <strong><?php echo htmlspecialchars($nextPatient['queue_timing_label']); ?></strong>
-                        </div>
-                        <div class="detail-pill">
-                            <span>Time</span>
-                            <strong><?php echo nurse_time_label($nextPatient['appointment_time']); ?></strong>
-                        </div>
-                        <div class="detail-pill">
-                            <span>Doctor</span>
-                            <strong><?php echo htmlspecialchars($nextPatient['doctor_name'] ?: 'Not assigned'); ?></strong>
-                        </div>
-                        <div class="detail-pill">
-                            <span>Age / Gender</span>
-                            <strong><?php echo htmlspecialchars(($nextPatient['patient_age'] ?: 'N/A') . ' / ' . ($nextPatient['patient_gender'] ?: 'N/A')); ?></strong>
-                        </div>
-                        <div class="detail-pill">
-                            <span>Phone</span>
-                            <strong><?php echo htmlspecialchars($nextPatient['patient_phone'] ?: 'No phone'); ?></strong>
-                        </div>
-                    </div>
-                    <div class="queue-actions">
-                        <a class="btn primary" href="nurse_patient.php?id=<?php echo (int) $nextPatient['patient_id']; ?>">Open record</a>
-                        <a class="btn secondary" href="nurse_medical.php?patient=<?php echo (int) $nextPatient['patient_id']; ?>">Add note</a>
-                        <a class="btn secondary" href="nurse_lab.php?patient=<?php echo (int) $nextPatient['patient_id']; ?>">Add lab</a>
-                        <?php if (nurse_status($nextPatient) !== 'completed' && nurse_status($nextPatient) !== 'cancelled'): ?>
-                            <form method="post">
-                                <input type="hidden" name="nurse_status_action" value="complete">
-                                <input type="hidden" name="appointment_id" value="<?php echo (int) $nextPatient['id']; ?>">
-                                <button class="btn complete" type="submit" onclick="return confirm('Mark this visit as completed?')">Complete</button>
-                            </form>
-                        <?php endif; ?>
-                    </div>
-                </div>
-            <?php else: ?>
-                <div class="empty-state">No pending or confirmed patient in the queue.</div>
-            <?php endif; ?>
-        </div>
-
-        <div class="panel">
-            <div class="panel-head">
-                <div>
-                    <h2>Queue at a glance</h2>
-                    <p>Current appointment and documentation totals.</p>
-                </div>
-            </div>
-            <div class="activity-list">
-                <div class="activity-item">
-                    <strong><?php echo $activeQueue; ?> active in queue</strong>
-                    <span><?php echo $statusTotals['pending']; ?> needs confirmation · <?php echo $statusTotals['confirmed']; ?> ready for care</span>
-                </div>
-                <div class="activity-item">
-                    <strong><?php echo $statusTotals['completed']; ?> completed</strong>
-                    <span><?php echo $statusTotals['cancelled']; ?> cancelled · <?php echo $totalToday; ?> booked appointments</span>
-                </div>
-                <div class="activity-item">
-                    <strong><?php echo $todayRecordCount; ?> notes today · <?php echo $todayLabCount; ?> results today</strong>
-                    <span>Use the header links when you need to open those modules.</span>
-                </div>
-            </div>
-        </div>
-    </section>
-
-    <section class="panel">
-        <div class="panel-head">
-            <div>
-                <h2>Patient queue</h2>
-                <p>All booked appointments, including upcoming patient visits.</p>
-            </div>
-            <a class="btn secondary" href="view_appointments.php">All appointments</a>
-        </div>
-
-        <?php if (empty($todayAppointments)): ?>
-            <div class="empty-state">No booked appointments yet.</div>
-        <?php else: ?>
-            <div class="queue-toolbar" role="search" aria-label="Filter patient queue">
-                <input type="search" id="queueSearch" placeholder="Search patient, doctor, date, phone, or notes">
-                <select id="queueStatusFilter" aria-label="Filter queue status">
-                    <option value="">All statuses</option>
-                    <option value="pending">Needs confirmation</option>
-                    <option value="confirmed">Ready for care</option>
-                    <option value="completed">Completed</option>
-                    <option value="cancelled">Cancelled</option>
-                </select>
-            </div>
-            <div id="queueNoMatches" class="empty-state hidden">No queue item matches your search.</div>
-
-            <div class="queue-list">
-                <?php foreach ($todayAppointments as $appointment): ?>
-                    <?php
-                    $status = nurse_status($appointment);
-                    $doctorName = $appointment['doctor_name'] ?: 'Not assigned';
-                    $phone = $appointment['patient_phone'] ?: 'No phone';
-                    $notes = nurse_short_text($appointment['notes'] ?? '');
-                    $searchText = trim(implode(' ', [
-                        $appointment['patient_name'] ?? '',
-                        $doctorName,
-                        $appointment['appointment_date'] ?? '',
-                        nurse_date_label($appointment['appointment_date'] ?? ''),
-                        $phone,
-                        $appointment['patient_email'] ?? '',
-                        $appointment['patient_gender'] ?? '',
-                        (string) ($appointment['patient_age'] ?? ''),
-                        $appointment['notes'] ?? '',
-                        $status,
-                    ]));
-                    ?>
-                    <article class="queue-row" data-queue-row data-status="<?php echo htmlspecialchars($status); ?>" data-search="<?php echo htmlspecialchars($searchText, ENT_QUOTES); ?>">
-                        <div class="time-block"><?php echo nurse_time_label($appointment['appointment_time']); ?></div>
-                        <?php echo renderPatientAvatar($appointment, ['size' => 'md', 'link' => true, 'link_target' => 'nurse', 'patient_id' => (int) $appointment['patient_id']]); ?>
-                        <div>
-                            <div class="patient-name"><?php echo htmlspecialchars($appointment['patient_name']); ?></div>
-                            <div class="queue-meta">
-                                <span>Date: <?php echo htmlspecialchars(nurse_date_label($appointment['appointment_date'])); ?></span>
-                                <span>Doctor: <?php echo htmlspecialchars($doctorName); ?></span>
-                                <span>Phone: <?php echo htmlspecialchars($phone); ?></span>
-                                <span>Age/Gender: <?php echo htmlspecialchars(($appointment['patient_age'] ?: 'N/A') . ' / ' . ($appointment['patient_gender'] ?: 'N/A')); ?></span>
-                                <?php if ($notes !== 'None'): ?>
-                                    <span>Notes: <?php echo htmlspecialchars($notes); ?></span>
-                                <?php endif; ?>
+                    <div class="next-card">
+                        <div style="margin-bottom:12px"><?php echo renderPatientAvatarWithName($nextPatient, ['size' => 'lg', 'link' => true, 'link_target' => 'nurse', 'patient_id' => (int) $nextPatient['patient_id']]); ?></div>
+                        <div class="detail-grid">
+                            <div class="detail-pill">
+                                <span>Date</span>
+                                <strong><?php echo htmlspecialchars(nurse_date_label($nextPatient['appointment_date'])); ?></strong>
+                            </div>
+                            <div class="detail-pill">
+                                <span>Queue note</span>
+                                <strong><?php echo htmlspecialchars($nextPatient['queue_timing_label']); ?></strong>
+                            </div>
+                            <div class="detail-pill">
+                                <span>Time</span>
+                                <strong><?php echo nurse_time_label($nextPatient['appointment_time']); ?></strong>
+                            </div>
+                            <div class="detail-pill">
+                                <span>Doctor</span>
+                                <strong><?php echo htmlspecialchars($nextPatient['doctor_name'] ?: 'Not assigned'); ?></strong>
+                            </div>
+                            <div class="detail-pill">
+                                <span>Age / Gender</span>
+                                <strong><?php echo htmlspecialchars(($nextPatient['patient_age'] ?: 'N/A') . ' / ' . ($nextPatient['patient_gender'] ?: 'N/A')); ?></strong>
+                            </div>
+                            <div class="detail-pill">
+                                <span>Phone</span>
+                                <strong><?php echo htmlspecialchars($nextPatient['patient_phone'] ?: 'No phone'); ?></strong>
                             </div>
                         </div>
                         <div class="queue-actions">
-                            <span class="status-badge <?php echo htmlspecialchars($status); ?>"><?php echo htmlspecialchars($appointment['status_label']); ?></span>
-                            <a class="btn primary" href="nurse_patient.php?id=<?php echo (int) $appointment['patient_id']; ?>">Open record</a>
-                            <a class="btn secondary" href="nurse_medical.php?patient=<?php echo (int) $appointment['patient_id']; ?>">Add note</a>
-                            <?php if ($status !== 'completed' && $status !== 'cancelled'): ?>
+                            <a class="btn primary" href="nurse_patient.php?id=<?php echo (int) $nextPatient['patient_id']; ?>">Open record</a>
+                            <a class="btn secondary" href="nurse_medical.php?patient=<?php echo (int) $nextPatient['patient_id']; ?>">Add note</a>
+                            <a class="btn secondary" href="nurse_lab.php?patient=<?php echo (int) $nextPatient['patient_id']; ?>">Add lab</a>
+                            <?php if (nurse_status($nextPatient) !== 'completed' && nurse_status($nextPatient) !== 'cancelled'): ?>
                                 <form method="post">
                                     <input type="hidden" name="nurse_status_action" value="complete">
-                                    <input type="hidden" name="appointment_id" value="<?php echo (int) $appointment['id']; ?>">
+                                    <input type="hidden" name="appointment_id" value="<?php echo (int) $nextPatient['id']; ?>">
                                     <button class="btn complete" type="submit" onclick="return confirm('Mark this visit as completed?')">Complete</button>
                                 </form>
                             <?php endif; ?>
                         </div>
-                    </article>
-                <?php endforeach; ?>
+                    </div>
+                <?php else: ?>
+                    <div class="empty-state">No pending or confirmed patient in the queue.</div>
+                <?php endif; ?>
             </div>
-        <?php endif; ?>
+        </div>
+
+        <div class="panel patient-queue-panel">
+            <div class="panel-head">
+                <div>
+                    <h2>Patient queue</h2>
+                    <p>Search and manage booked patient visits.</p>
+                </div>
+                <a class="btn secondary" href="view_appointments.php">All appointments</a>
+            </div>
+
+            <?php if (empty($todayAppointments)): ?>
+                <div class="empty-state">No booked appointments yet.</div>
+            <?php else: ?>
+                <div class="queue-toolbar" role="search" aria-label="Filter patient queue">
+                    <input type="search" id="queueSearch" placeholder="Search patient, doctor, date, phone, or notes">
+                    <select id="queueStatusFilter" aria-label="Filter queue status">
+                        <option value="">All statuses</option>
+                        <option value="pending">Needs confirmation</option>
+                        <option value="confirmed">Ready for care</option>
+                        <option value="completed">Completed</option>
+                        <option value="cancelled">Cancelled</option>
+                    </select>
+                </div>
+                <div id="queueNoMatches" class="empty-state hidden">No queue item matches your search.</div>
+
+                <div class="queue-list queue-scroll">
+                    <?php foreach ($todayAppointments as $appointment): ?>
+                        <?php
+                        $status = nurse_status($appointment);
+                        $doctorName = $appointment['doctor_name'] ?: 'Not assigned';
+                        $phone = $appointment['patient_phone'] ?: 'No phone';
+                        $notes = nurse_short_text($appointment['notes'] ?? '');
+                        $searchText = trim(implode(' ', [
+                            $appointment['patient_name'] ?? '',
+                            $doctorName,
+                            $appointment['appointment_date'] ?? '',
+                            nurse_date_label($appointment['appointment_date'] ?? ''),
+                            $phone,
+                            $appointment['patient_email'] ?? '',
+                            $appointment['patient_gender'] ?? '',
+                            (string) ($appointment['patient_age'] ?? ''),
+                            $appointment['notes'] ?? '',
+                            $status,
+                        ]));
+                        ?>
+                        <article class="queue-row" data-queue-row data-status="<?php echo htmlspecialchars($status); ?>" data-search="<?php echo htmlspecialchars($searchText, ENT_QUOTES); ?>">
+                            <div class="time-block"><?php echo nurse_time_label($appointment['appointment_time']); ?></div>
+                            <?php echo renderPatientAvatar($appointment, ['size' => 'md', 'link' => true, 'link_target' => 'nurse', 'patient_id' => (int) $appointment['patient_id']]); ?>
+                            <div>
+                                <div class="patient-name"><?php echo htmlspecialchars($appointment['patient_name']); ?></div>
+                                <div class="queue-meta">
+                                    <span><?php echo htmlspecialchars(nurse_date_label($appointment['appointment_date'])); ?></span>
+                                    <span>Doctor: <?php echo htmlspecialchars($doctorName); ?></span>
+                                    <span><?php echo htmlspecialchars($phone); ?></span>
+                                    <?php if ($notes !== 'None'): ?>
+                                        <span>Notes: <?php echo htmlspecialchars($notes); ?></span>
+                                    <?php endif; ?>
+                                </div>
+                            </div>
+                            <div class="queue-actions">
+                                <span class="status-badge <?php echo htmlspecialchars($status); ?>"><?php echo htmlspecialchars($appointment['status_label']); ?></span>
+                                <a class="btn primary" href="nurse_patient.php?id=<?php echo (int) $appointment['patient_id']; ?>">Open record</a>
+                                <a class="btn secondary" href="nurse_medical.php?patient=<?php echo (int) $appointment['patient_id']; ?>">Add note</a>
+                                <?php if ($status !== 'completed' && $status !== 'cancelled'): ?>
+                                    <form method="post">
+                                        <input type="hidden" name="nurse_status_action" value="complete">
+                                        <input type="hidden" name="appointment_id" value="<?php echo (int) $appointment['id']; ?>">
+                                        <button class="btn complete" type="submit" onclick="return confirm('Mark this visit as completed?')">Complete</button>
+                                    </form>
+                                <?php endif; ?>
+                            </div>
+                        </article>
+                    <?php endforeach; ?>
+                </div>
+            <?php endif; ?>
+        </div>
     </section>
 
 </main>
 <?php include 'includes/footer.php'; ?>
-
-
-
-
-
-
 
 

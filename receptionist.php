@@ -229,6 +229,11 @@ body {
     padding: 28px 20px 46px;
 }
 
+.receptionist-dashboard > section {
+    padding-top: 0;
+    padding-bottom: 0;
+}
+
 .desk-hero {
     display: grid;
     grid-template-columns: minmax(0, 1fr) 260px;
@@ -241,8 +246,7 @@ body {
 .hero-side,
 .metric-card,
 .panel,
-.appointment-row,
-.shortcut-card {
+.appointment-row {
     border: 1px solid #dce8ef;
     border-radius: 8px;
     background: #fff;
@@ -1013,43 +1017,10 @@ body.modal-open {
     display: none;
 }
 
-.shortcut-grid {
-    display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 12px;
-    margin-top: 16px;
-}
-
-.shortcut-card {
-    padding: 16px;
-    color: inherit;
-    text-decoration: none;
-    display: grid;
-    gap: 6px;
-}
-
-.shortcut-card span {
-    color: #60727d;
-    font-size: 0.78rem;
-    font-weight: 900;
-    text-transform: uppercase;
-}
-
-.shortcut-card strong {
-    color: #073b4c;
-    font-size: 1.02rem;
-}
-
-.shortcut-card small {
-    color: #60727d;
-    line-height: 1.4;
-}
-
 @media (max-width: 980px) {
     .desk-hero,
     .workbench-grid,
-    .metrics-grid,
-    .shortcut-grid {
+    .metrics-grid {
         grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
@@ -1066,7 +1037,6 @@ body.modal-open {
     .desk-hero,
     .workbench-grid,
     .metrics-grid,
-    .shortcut-grid,
     .appointment-toolbar,
     .detail-grid,
     .staff-strip {
@@ -1105,164 +1075,6 @@ body.modal-open {
         text-align: left;
     }
 }
-';
-
-$additionalScripts = '
-document.addEventListener("DOMContentLoaded", function () {
-    const searchInput = document.getElementById("appointmentSearch");
-    const statusFilter = document.getElementById("appointmentStatusFilter");
-    const noMatches = document.getElementById("appointmentNoMatches");
-    const actionModal = document.getElementById("statusActionModal");
-    const actionDialog = actionModal ? actionModal.querySelector("[data-status-dialog]") : null;
-    const actionKicker = document.getElementById("statusActionKicker");
-    const actionTitle = document.getElementById("statusActionTitle");
-    const actionMessage = document.getElementById("statusActionMessage");
-    const actionPatient = document.getElementById("statusActionPatient");
-    const actionSchedule = document.getElementById("statusActionSchedule");
-    const actionNote = document.getElementById("statusActionNote");
-    const actionSubmit = document.getElementById("statusActionSubmit");
-    let pendingStatusForm = null;
-    let lastActionButton = null;
-
-    const actionContent = {
-        confirmed: {
-            kicker: "Send to clinic queue",
-            title: "Confirm appointment?",
-            message: "This patient will be moved to the nurse/doctor queue.",
-            note: "The patient will receive a confirmation email and the reminder schedule will stay active.",
-            button: "Confirm appointment"
-        },
-        completed: {
-            kicker: "Close patient visit",
-            title: "Complete appointment?",
-            message: "Use this only when the patient visit and clinic service are finished.",
-            note: "This removes the appointment from the active queue and marks it as completed.",
-            button: "Mark as completed"
-        },
-        cancelled: {
-            kicker: "Remove booking",
-            title: "Cancel appointment?",
-            message: "This appointment will be removed from the active clinic queue.",
-            note: "Cancellation cannot be undone from this dashboard. Review the patient and schedule before continuing.",
-            button: "Cancel appointment"
-        }
-    };
-
-    function closeActionModal() {
-        if (!actionModal) {
-            return;
-        }
-        actionModal.classList.remove("open");
-        actionModal.setAttribute("aria-hidden", "true");
-        document.body.classList.remove("modal-open");
-        pendingStatusForm = null;
-        window.setTimeout(function () {
-            if (lastActionButton) {
-                lastActionButton.focus();
-            }
-        }, 0);
-    }
-
-    function openActionModal(button) {
-        if (!actionModal) {
-            return;
-        }
-        const form = button.closest("form");
-        const action = button.getAttribute("data-status-action") || "";
-        const content = actionContent[action];
-        if (!form || !content) {
-            return;
-        }
-
-        pendingStatusForm = form;
-        lastActionButton = button;
-        actionModal.setAttribute("data-action", action);
-        actionKicker.textContent = content.kicker;
-        actionTitle.textContent = content.title;
-        actionMessage.textContent = content.message;
-        actionPatient.textContent = button.getAttribute("data-patient") || "Patient";
-        actionSchedule.textContent = button.getAttribute("data-schedule") || "Schedule unavailable";
-        actionNote.textContent = content.note;
-        actionSubmit.disabled = false;
-        actionSubmit.textContent = content.button;
-        actionModal.classList.add("open");
-        actionModal.setAttribute("aria-hidden", "false");
-        document.body.classList.add("modal-open");
-        window.setTimeout(function () {
-            actionSubmit.focus();
-        }, 0);
-    }
-
-    function filterAppointments() {
-        const query = (searchInput && searchInput.value ? searchInput.value : "").toLowerCase().trim();
-        const status = statusFilter ? statusFilter.value : "";
-        let visible = 0;
-
-        document.querySelectorAll("[data-appointment-row]").forEach(function (row) {
-            const haystack = (row.getAttribute("data-search") || "").toLowerCase();
-            const rowStatus = row.getAttribute("data-status") || "";
-            const show = (!query || haystack.indexOf(query) !== -1) && (!status || rowStatus === status);
-            row.classList.toggle("hidden", !show);
-            if (show) {
-                visible++;
-            }
-        });
-
-        if (noMatches) {
-            noMatches.classList.toggle("hidden", visible !== 0);
-        }
-    }
-
-    if (searchInput) {
-        searchInput.addEventListener("input", filterAppointments);
-    }
-    if (statusFilter) {
-        statusFilter.addEventListener("change", filterAppointments);
-    }
-
-    document.querySelectorAll("[data-status-action]").forEach(function (button) {
-        button.addEventListener("click", function (event) {
-            event.preventDefault();
-            openActionModal(button);
-        });
-    });
-
-    if (actionModal) {
-        actionModal.querySelectorAll("[data-status-close]").forEach(function (button) {
-            button.addEventListener("click", closeActionModal);
-        });
-        actionModal.addEventListener("click", function (event) {
-            if (event.target === actionModal) {
-                closeActionModal();
-            }
-        });
-    }
-
-    if (actionDialog) {
-        actionDialog.addEventListener("click", function (event) {
-            event.stopPropagation();
-        });
-    }
-
-    if (actionSubmit) {
-        actionSubmit.addEventListener("click", function () {
-            if (!pendingStatusForm) {
-                return;
-            }
-            actionSubmit.disabled = true;
-            actionSubmit.textContent = "Saving...";
-            pendingStatusForm.submit();
-        });
-    }
-
-    document.addEventListener("keydown", function (event) {
-        if (event.key === "Escape" && actionModal && actionModal.classList.contains("open")) {
-            closeActionModal();
-        }
-    });
-
-    filterAppointments();
-});
 ';
 
 include 'includes/header.php';
@@ -1319,11 +1131,6 @@ include 'includes/header.php';
                     <h2>Next patient</h2>
                     <p>Current queue priority</p>
                 </div>
-                <?php if ($nextAppointment): ?>
-                    <span class="status-badge <?php echo receptionist_status($nextAppointment); ?>">
-                        <?php echo htmlspecialchars($nextAppointment['status_label']); ?>
-                    </span>
-                <?php endif; ?>
             </div>
 
             <?php if ($nextAppointment): ?>
@@ -1407,182 +1214,6 @@ include 'includes/header.php';
         </div>
     </section>
 
-    <section class="panel schedule-card">
-        <div class="panel-head">
-            <div>
-                <h2>Appointments</h2>
-                <p>All booked patient appointments</p>
-            </div>
-            <a class="dashboard-btn secondary" href="view_appointments.php">All appointments</a>
-        </div>
-
-        <?php if (empty($todayAppointments)): ?>
-            <div class="empty-state">No booked appointments yet.</div>
-        <?php else: ?>
-            <div class="appointment-toolbar" role="search" aria-label="Filter appointments">
-                <input type="search" id="appointmentSearch" placeholder="Search patient, doctor, date, phone, or notes">
-                <select id="appointmentStatusFilter" aria-label="Filter appointment status">
-                    <option value="">All statuses</option>
-                    <option value="pending">Needs confirmation</option>
-                    <option value="confirmed">Ready for nurse/doctor</option>
-                    <option value="completed">Completed</option>
-                    <option value="cancelled">Cancelled</option>
-                </select>
-            </div>
-            <div class="appointment-summary" aria-label="Appointment totals">
-                <span><?php echo $statusTotals['pending']; ?> needs confirmation</span>
-                <span><?php echo $readyQueue; ?> ready for nurse/doctor</span>
-                <span><?php echo $statusTotals['completed']; ?> completed</span>
-                <span><?php echo $statusTotals['cancelled']; ?> cancelled</span>
-            </div>
-            <div id="appointmentNoMatches" class="empty-state hidden">No appointments match your search.</div>
-
-            <div class="appointments-list">
-                <?php foreach ($todayAppointments as $appointment): ?>
-                    <?php
-                    $status = receptionist_status($appointment);
-                    $doctorName = $appointment['doctor_name'] ?: 'Not assigned';
-                    $phone = $appointment['patient_phone'] ?: 'No phone';
-                    $notes = trim((string) ($appointment['notes'] ?? ''));
-                    $doctorFlow = $appointment['doctor_flow'];
-                    $patientName = (string) ($appointment['patient_name'] ?? 'Patient');
-                    $appointmentSchedule = receptionist_date_label($appointment['appointment_date'] ?? '')
-                        . ' at ' . receptionist_time_label($appointment['appointment_time'] ?? '');
-                    $searchText = trim(implode(' ', [
-                        $appointment['patient_name'] ?? '',
-                        $doctorName,
-                        $appointment['appointment_date'] ?? '',
-                        receptionist_date_label($appointment['appointment_date'] ?? ''),
-                        $phone,
-                        $notes,
-                        $status,
-                        $appointment['status_label'],
-                        $doctorFlow['label'],
-                        $doctorFlow['detail'],
-                    ]));
-                    ?>
-                    <article class="appointment-row" data-appointment-row data-status="<?php echo htmlspecialchars($status); ?>" data-search="<?php echo htmlspecialchars($searchText, ENT_QUOTES); ?>">
-                        <div class="time-block"><?php echo receptionist_time_label($appointment['appointment_time']); ?></div>
-                        <?php echo renderPatientAvatar($appointment, ['size' => 'md', 'link' => true, 'patient_id' => (int) $appointment['patient_id']]); ?>
-                        <div class="appointment-main">
-                            <div class="appointment-patient"><?php echo htmlspecialchars($appointment['patient_name']); ?></div>
-                            <div class="appointment-details">
-                                <span>Date: <?php echo htmlspecialchars(receptionist_date_label($appointment['appointment_date'])); ?></span>
-                                <span>Doctor: <?php echo htmlspecialchars($doctorName); ?></span>
-                                <span class="doctor-flow <?php echo htmlspecialchars($doctorFlow['class']); ?>"><?php echo htmlspecialchars($doctorFlow['label']); ?></span>
-                                <span>Phone: <?php echo htmlspecialchars($phone); ?></span>
-                                <?php if ($notes !== ''): ?>
-                                    <span>Notes: <?php echo htmlspecialchars(receptionist_short_text($notes)); ?></span>
-                                <?php endif; ?>
-                            </div>
-                        </div>
-                        <div class="appointment-actions">
-                            <span class="status-badge <?php echo htmlspecialchars($status); ?>"><?php echo htmlspecialchars($appointment['status_label']); ?></span>
-                            <?php if ($status === 'pending'): ?>
-                                <form method="POST" action="receptionist.php">
-                                    <input type="hidden" name="update_status" value="1">
-                                    <input type="hidden" name="appointment_id" value="<?php echo (int) $appointment['id']; ?>">
-                                    <input type="hidden" name="status" value="confirmed">
-                                    <button
-                                        type="submit"
-                                        class="btn-action btn-confirm"
-                                        data-status-action="confirmed"
-                                        data-patient="<?php echo htmlspecialchars($patientName, ENT_QUOTES); ?>"
-                                        data-schedule="<?php echo htmlspecialchars($appointmentSchedule, ENT_QUOTES); ?>"
-                                    >Confirm</button>
-                                </form>
-                            <?php endif; ?>
-                            <?php if ($status !== 'completed' && $status !== 'cancelled'): ?>
-                                <form method="POST" action="receptionist.php">
-                                    <input type="hidden" name="update_status" value="1">
-                                    <input type="hidden" name="appointment_id" value="<?php echo (int) $appointment['id']; ?>">
-                                    <input type="hidden" name="status" value="completed">
-                                    <button
-                                        type="submit"
-                                        class="btn-action btn-complete"
-                                        data-status-action="completed"
-                                        data-patient="<?php echo htmlspecialchars($patientName, ENT_QUOTES); ?>"
-                                        data-schedule="<?php echo htmlspecialchars($appointmentSchedule, ENT_QUOTES); ?>"
-                                    >Complete</button>
-                                </form>
-                                <form method="POST" action="receptionist.php">
-                                    <input type="hidden" name="update_status" value="1">
-                                    <input type="hidden" name="appointment_id" value="<?php echo (int) $appointment['id']; ?>">
-                                    <input type="hidden" name="status" value="cancelled">
-                                    <button
-                                        type="submit"
-                                        class="btn-action btn-cancel"
-                                        data-status-action="cancelled"
-                                        data-patient="<?php echo htmlspecialchars($patientName, ENT_QUOTES); ?>"
-                                        data-schedule="<?php echo htmlspecialchars($appointmentSchedule, ENT_QUOTES); ?>"
-                                    >Cancel</button>
-                                </form>
-                            <?php endif; ?>
-                        </div>
-                    </article>
-                <?php endforeach; ?>
-            </div>
-        <?php endif; ?>
-    </section>
-
-    <section class="shortcut-grid" aria-label="Quick actions">
-        <a class="shortcut-card" href="view_appointments.php">
-            <span>Appointments</span>
-            <strong>Full schedule</strong>
-            <small>Past and upcoming records</small>
-        </a>
-        <a class="shortcut-card" href="register_patient_receptionist.php">
-            <span>Patients</span>
-            <strong>Register patient</strong>
-            <small>New patient intake</small>
-        </a>
-        <a class="shortcut-card" href="receptionist_doctors.php">
-            <span>Doctors</span>
-            <strong>Doctor schedules</strong>
-            <small>Availability and clinic hours</small>
-        </a>
-        <a class="shortcut-card" href="receptionist_lab_services.php">
-            <span>Laboratory</span>
-            <strong>Lab catalog</strong>
-            <small>Packages and services</small>
-        </a>
-    </section>
 </main>
 
-<div
-    class="status-action-modal"
-    id="statusActionModal"
-    data-action="confirmed"
-    aria-hidden="true"
->
-    <section
-        class="status-action-dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="statusActionTitle"
-        aria-describedby="statusActionMessage"
-        data-status-dialog
-    >
-        <div class="status-action-header">
-            <span class="status-action-mark" aria-hidden="true"></span>
-            <div>
-                <span class="status-action-kicker" id="statusActionKicker">Appointment update</span>
-                <h2 id="statusActionTitle">Update appointment?</h2>
-            </div>
-            <button type="button" class="status-action-close" data-status-close aria-label="Close">&times;</button>
-        </div>
-        <div class="status-action-body">
-            <p class="status-action-message" id="statusActionMessage"></p>
-            <div class="status-action-patient">
-                <strong id="statusActionPatient"></strong>
-                <span id="statusActionSchedule"></span>
-            </div>
-            <p class="status-action-note" id="statusActionNote"></p>
-        </div>
-        <div class="status-action-footer">
-            <button type="button" class="status-action-back" data-status-close>Go back</button>
-            <button type="button" class="status-action-submit" id="statusActionSubmit">Continue</button>
-        </div>
-    </section>
-</div>
 <?php include 'includes/footer.php'; ?>

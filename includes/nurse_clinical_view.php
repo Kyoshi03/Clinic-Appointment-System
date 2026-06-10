@@ -71,7 +71,16 @@ $clinicalTab = $clinicalTab ?? 'medical';
                         <strong><?php echo htmlspecialchars($record['patient_name'] . ' - ' . ($record['diagnosis'] ?: $record['title'])); ?></strong>
                         <small><?php echo htmlspecialchars($record['created_at']); ?></small>
                         <?php nurse_medical_render_sections($record); ?>
-                        <p><a href="nurse_export.php?type=medical&amp;id=<?php echo (int) $record['record_id']; ?>&amp;action=print" target="_blank">Print</a> | <a href="nurse_export.php?type=medical&amp;id=<?php echo (int) $record['record_id']; ?>&amp;action=download">Download</a></p>
+                        <div class="record-actions" aria-label="Medical record actions">
+                            <a class="record-action-btn print" href="nurse_export.php?type=medical&amp;id=<?php echo (int) $record['record_id']; ?>&amp;action=print" target="_blank" rel="noopener">
+                                <span aria-hidden="true">P</span>
+                                Print report
+                            </a>
+                            <a class="record-action-btn download" href="nurse_export.php?type=medical&amp;id=<?php echo (int) $record['record_id']; ?>&amp;action=download">
+                                <span aria-hidden="true">D</span>
+                                Download PDF
+                            </a>
+                        </div>
                     </div>
                 <?php endforeach; ?>
             </div>
@@ -82,7 +91,16 @@ $clinicalTab = $clinicalTab ?? 'medical';
                         <strong><?php echo htmlspecialchars($lab['patient_name'] . ' - ' . $lab['test_name']); ?></strong>
                         <small><?php echo htmlspecialchars($lab['result_date']); ?></small>
                         <div style="white-space:pre-wrap"><?php echo htmlspecialchars($lab['result_text'] ?? ''); ?></div>
-                        <p><a href="nurse_export.php?type=lab&amp;id=<?php echo (int) $lab['record_id']; ?>&amp;action=print" target="_blank">Print</a> | <a href="nurse_export.php?type=lab&amp;id=<?php echo (int) $lab['record_id']; ?>&amp;action=download">Download</a></p>
+                        <div class="record-actions" aria-label="Lab result actions">
+                            <a class="record-action-btn print" href="nurse_export.php?type=lab&amp;id=<?php echo (int) $lab['record_id']; ?>&amp;action=print" target="_blank" rel="noopener">
+                                <span aria-hidden="true">P</span>
+                                Print report
+                            </a>
+                            <a class="record-action-btn download" href="nurse_export.php?type=lab&amp;id=<?php echo (int) $lab['record_id']; ?>&amp;action=download">
+                                <span aria-hidden="true">D</span>
+                                Download PDF
+                            </a>
+                        </div>
                     </div>
                 <?php endforeach; ?>
             </div>

@@ -64,6 +64,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['profile_action'] ?? '') ==
     $confirmNewPassword = $_POST['confirm_new_password'] ?? '';
     $allowedGenders = ['', 'Male', 'Female', 'Other'];
     $computedAge = '';
+    $parsedBirthDate = null;
+    $birthDateIsValid = true;
+
+    if ($dateOfBirth !== '') {
+        $parsedBirthDate = DateTime::createFromFormat('!Y-m-d', $dateOfBirth);
+        $birthDateErrors = DateTime::getLastErrors();
+        $birthDateIsValid = $parsedBirthDate instanceof DateTime
+            && ($birthDateErrors === false || ($birthDateErrors['warning_count'] === 0 && $birthDateErrors['error_count'] === 0))
+            && $parsedBirthDate->format('Y-m-d') === $dateOfBirth;
+    }
 
     if ($fullName === '') {
         $profileError = 'Full name is required.';
@@ -71,9 +81,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['profile_action'] ?? '') ==
         $profileError = 'Please enter a valid email address.';
     } elseif (!in_array($gender, $allowedGenders, true)) {
         $profileError = 'Please choose a valid gender.';
-    } elseif ($dateOfBirth !== '' && strtotime($dateOfBirth) === false) {
+    } elseif (!$birthDateIsValid) {
         $profileError = 'Please enter a valid date of birth.';
-    } elseif ($dateOfBirth !== '' && strtotime($dateOfBirth) > time()) {
+    } elseif ($parsedBirthDate instanceof DateTime && $parsedBirthDate > new DateTime('today')) {
         $profileError = 'Date of birth cannot be in the future.';
     } else {
         if ($newPassword !== '' || $confirmNewPassword !== '' || $currentPassword !== '') {
@@ -102,9 +112,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['profile_action'] ?? '') ==
 
         if ($profileError === '') {
             if ($dateOfBirth !== '') {
-                $birthDate = new DateTime($dateOfBirth);
                 $todayDate = new DateTime('today');
-                $computedAge = (string) $birthDate->diff($todayDate)->y;
+                $computedAge = (string) $parsedBirthDate->diff($todayDate)->y;
             }
 
         $photoStmt = $conn->prepare('SELECT profile_photo FROM users WHERE id = ?');
@@ -360,8 +369,11 @@ function patient_format_time(?string $time): string {
 }
 
 function patient_booking_label(?string $type): string {
+    if ($type === 'consultation') {
+        return 'Doctor consultation';
+    }
     if ($type === 'package') {
-        return 'Package';
+        return 'Laboratory package';
     }
     if ($type === 'individual') {
         return 'Laboratory tests';
@@ -409,17 +421,32 @@ $additionalStyles = '
         padding: 28px 20px 42px;
     }
 
+    .dashboard-layout section {
+        padding-top: 0;
+        padding-bottom: 0;
+    }
+
+    .patient-shell > .clinic-tips-bar {
+        padding-top: 0;
+        padding-bottom: 0;
+    }
+
     .patient-hero {
         display: grid;
         grid-template-columns: auto minmax(0, 1fr) auto;
-        gap: 24px;
+        gap: 28px;
         align-items: center;
         background: #073b4c;
         color: #fff;
         border-radius: 8px;
-        padding: 28px;
+        padding: 26px 30px;
         margin-bottom: 18px;
         box-shadow: 0 14px 34px rgba(7, 59, 76, 0.18);
+    }
+
+    .patient-hero > div:not(.hero-actions) {
+        min-width: 0;
+        padding: 3px 0;
     }
 
     .patient-kicker {
@@ -432,16 +459,17 @@ $additionalStyles = '
     }
 
     .patient-hero h2 {
-        margin: 0 0 8px;
+        margin: 0 0 10px;
         font-size: clamp(1.7rem, 3vw, 2.5rem);
-        line-height: 1.08;
+        line-height: 1.14;
         color: #fff;
     }
 
     .patient-hero p {
         margin: 0;
+        max-width: 720px;
         color: rgba(255, 255, 255, 0.82);
-        line-height: 1.65;
+        line-height: 1.55;
     }
 
     .patient-hero.is-new-welcome {
@@ -470,25 +498,61 @@ $additionalStyles = '
         margin-bottom: 18px;
     }
 
+    .clinic-procedure-head {
+        grid-column: 1 / -1;
+        display: flex;
+        align-items: end;
+        justify-content: space-between;
+        gap: 16px;
+        margin-bottom: 2px;
+    }
+
+    .clinic-procedure-head h3 {
+        margin: 0 0 4px;
+        color: #073b4c;
+        font-size: 1.15rem;
+    }
+
+    .clinic-procedure-head p {
+        margin: 0;
+        color: #60727d;
+        font-size: 0.88rem;
+        line-height: 1.45;
+    }
+
     .clinic-tip-card {
+        position: relative;
         background: #fff;
         border: 1px solid #dceef2;
         border-radius: 10px;
-        padding: 14px 16px;
+        padding: 16px;
         box-shadow: 0 8px 18px rgba(7, 59, 76, 0.05);
+    }
+
+    .clinic-step-number {
+        display: inline-grid;
+        place-items: center;
+        width: 32px;
+        height: 32px;
+        margin-bottom: 10px;
+        border-radius: 50%;
+        background: #e5f5fb;
+        color: #006b9f;
+        font-size: 0.9rem;
+        font-weight: 900;
     }
 
     .clinic-tip-card strong {
         display: block;
         color: #073b4c;
-        font-size: 0.9rem;
+        font-size: 0.95rem;
         margin-bottom: 6px;
     }
 
     .clinic-tip-card p {
         margin: 0;
         color: #566872;
-        font-size: 0.82rem;
+        font-size: 0.86rem;
         line-height: 1.5;
     }
 
@@ -551,8 +615,9 @@ $additionalStyles = '
     .hero-actions {
         display: flex;
         flex-wrap: wrap;
-        gap: 10px;
+        gap: 12px;
         justify-content: flex-end;
+        align-items: center;
     }
 
     .primary-btn,
@@ -639,7 +704,16 @@ $additionalStyles = '
         align-items: start;
     }
 
+    .dashboard-layout > div,
+    .dashboard-layout > aside {
+        min-width: 0;
+        display: grid;
+        gap: 16px;
+    }
+
     .panel {
+        min-width: 0;
+        box-sizing: border-box;
         background: #fff;
         border: 1px solid #e0ebf3;
         border-radius: 8px;
@@ -647,16 +721,24 @@ $additionalStyles = '
         box-shadow: 0 10px 24px rgba(25, 76, 110, 0.06);
     }
 
+    .dashboard-layout section.panel {
+        padding: 20px;
+    }
+
     .panel + .panel {
-        margin-top: 16px;
+        margin-top: 0;
     }
 
     .panel-header {
         display: flex;
-        align-items: center;
+        align-items: flex-start;
         justify-content: space-between;
         gap: 12px;
         margin-bottom: 16px;
+    }
+
+    .panel-header > div {
+        min-width: 0;
     }
 
     .panel-header h3 {
@@ -669,6 +751,16 @@ $additionalStyles = '
         margin: 4px 0 0;
         color: #60727d;
         font-size: 0.92rem;
+        line-height: 1.45;
+    }
+
+    .panel-header .plain-btn {
+        flex: 0 0 auto;
+        width: auto;
+        min-width: 78px;
+        min-height: 40px;
+        padding: 8px 14px;
+        white-space: nowrap;
     }
 
     .next-card {
@@ -906,6 +998,42 @@ $additionalStyles = '
         gap: 12px;
     }
 
+    #health-records .record-grid {
+        max-height: 330px;
+        overflow-y: auto;
+        overscroll-behavior: contain;
+        padding-right: 7px;
+        scrollbar-width: thin;
+        scrollbar-color: #98bfd2 #edf5f8;
+    }
+
+    #health-records .record-grid::-webkit-scrollbar {
+        width: 8px;
+    }
+
+    #health-records .record-grid::-webkit-scrollbar-track {
+        background: #edf5f8;
+        border-radius: 999px;
+    }
+
+    #health-records .record-grid::-webkit-scrollbar-thumb {
+        background: #98bfd2;
+        border-radius: 999px;
+    }
+
+    .record-column {
+        min-width: 0;
+    }
+
+    #health-records .empty-state {
+        min-height: 138px;
+        box-sizing: border-box;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+    }
+
     .record-column h4 {
         margin: 0 0 10px;
         color: #073b4c;
@@ -951,9 +1079,9 @@ $additionalStyles = '
     }
 
     .readiness-item {
-        display: flex;
-        align-items: flex-start;
-        justify-content: space-between;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        align-items: center;
         gap: 12px;
         border: 1px solid #e0ebf3;
         border-radius: 8px;
@@ -962,15 +1090,22 @@ $additionalStyles = '
     }
 
     .readiness-item strong {
+        display: block;
         color: #073b4c;
+        line-height: 1.35;
+        margin-bottom: 3px;
     }
 
     .readiness-item span {
+        display: block;
         color: #60727d;
         font-size: 0.88rem;
+        line-height: 1.4;
+        overflow-wrap: anywhere;
     }
 
     .readiness-status {
+        align-self: center;
         color: #17643a;
         font-weight: 900;
         white-space: nowrap;
@@ -1509,6 +1644,10 @@ $additionalStyles = '
             padding: 18px 12px 34px;
         }
 
+        .clinic-tips-bar {
+            grid-template-columns: 1fr;
+        }
+
         .patient-hero,
         .panel {
             padding: 18px;
@@ -1656,9 +1795,9 @@ include 'includes/header.php';
             </div>
             <div class="hero-actions">
                 <?php if ($isNewPatientWelcome || $upcomingCount === 0): ?>
-                    <a href="book_appointment.php" class="primary-btn">Book First Appointment</a>
+                    <a href="book_appointment.php?start=1" class="primary-btn">Book First Appointment</a>
                 <?php else: ?>
-                    <a href="book_appointment.php" class="primary-btn">Book Appointment</a>
+                    <a href="book_appointment.php?start=1" class="primary-btn">Book Appointment</a>
                 <?php endif; ?>
                 <a href="view_appointments.php" class="secondary-btn">View Appointments</a>
             </div>
@@ -1682,7 +1821,7 @@ include 'includes/header.php';
                 <li>
                     <strong><?php echo $getStartedStep++; ?>. Book online</strong>
                     Choose clinic consultation or laboratory services and pick a date and time.
-                    <a href="book_appointment.php">Book now</a>
+                    <a href="book_appointment.php?start=1">Book now</a>
                 </li>
                 <li>
                     <strong><?php echo $getStartedStep++; ?>. Visit the clinic</strong>
@@ -1692,22 +1831,32 @@ include 'includes/header.php';
         </section>
         <?php endif; ?>
 
-        <section class="clinic-tips-bar" aria-label="Before your clinic visit">
-            <div class="clinic-tip-card">
-                <strong>Valid ID</strong>
-                <p>Bring a government-issued ID for verification at the clinic.</p>
+        <section class="clinic-tips-bar" aria-labelledby="clinicProcedureTitle">
+            <div class="clinic-procedure-head">
+                <div>
+                    <h3 id="clinicProcedureTitle">Your clinic visit, step by step</h3>
+                    <p>Follow these four steps from booking your appointment to viewing your clinic records.</p>
+                </div>
             </div>
             <div class="clinic-tip-card">
-                <strong>Payment</strong>
-                <p>Consultation and lab fees are paid at the clinic unless told otherwise.</p>
+                <span class="clinic-step-number" aria-hidden="true">1</span>
+                <strong>Book an appointment</strong>
+                <p>Choose a service, review the doctor schedule, then select your preferred date and time.</p>
             </div>
             <div class="clinic-tip-card">
-                <strong>On time</strong>
-                <p>Arrive a few minutes early for your scheduled slot.</p>
+                <span class="clinic-step-number" aria-hidden="true">2</span>
+                <strong>Check your confirmation</strong>
+                <p>Enter the email verification code and check My Appointments for the latest booking status.</p>
             </div>
             <div class="clinic-tip-card">
-                <strong>Documents</strong>
-                <p>Bring prescriptions, referrals, or past lab results if you have them.</p>
+                <span class="clinic-step-number" aria-hidden="true">3</span>
+                <strong>Prepare for your visit</strong>
+                <p>Bring a valid ID and related documents. Arrive 10 to 15 minutes before your schedule.</p>
+            </div>
+            <div class="clinic-tip-card">
+                <span class="clinic-step-number" aria-hidden="true">4</span>
+                <strong>Complete your clinic visit</strong>
+                <p>Pay at the front desk as instructed, then view posted medical notes and lab results online.</p>
             </div>
         </section>
 
@@ -1745,7 +1894,7 @@ include 'includes/header.php';
                     <div class="empty-state">
                         <h3>No upcoming appointments</h3>
                         <p>You have no scheduled visits yet. Start a booking when you are ready.</p>
-                        <a href="book_appointment.php" class="primary-btn">Book Your First Appointment</a>
+                        <a href="book_appointment.php?start=1" class="primary-btn">Book Your First Appointment</a>
                     </div>
                 <?php else: ?>
                     <div class="appointment-list">
@@ -1766,7 +1915,7 @@ include 'includes/header.php';
                                         <span>Doctor: <?php echo htmlspecialchars($doctorText); ?></span>
                                         <span>Ref #<?php echo (int) $appointment['id']; ?></span>
                                         <?php if (isset($appointment['total_display_price']) && $appointment['total_display_price'] !== null): ?>
-                                            <span>Est. PHP <?php echo number_format((float) $appointment['total_display_price'], 2); ?></span>
+                                            <span>Total: PHP <?php echo number_format((float) $appointment['total_display_price'], 2); ?></span>
                                         <?php endif; ?>
                                     </div>
                                 </div>
@@ -1991,7 +2140,7 @@ include 'includes/header.php';
                             </div>
                             <div class="profile-field">
                                 <label for="modal_date_of_birth">Date of birth</label>
-                                <input type="date" id="modal_date_of_birth" name="date_of_birth" value="<?php echo htmlspecialchars($userDetails['date_of_birth'] ?? ''); ?>" max="<?php echo date('Y-m-d'); ?>">
+                                <input type="date" id="modal_date_of_birth" name="date_of_birth" data-birthday-picker value="<?php echo htmlspecialchars($userDetails['date_of_birth'] ?? ''); ?>" max="<?php echo date('Y-m-d'); ?>">
                             </div>
                             <div class="profile-field">
                                 <label for="modal_civil_status">Civil status</label>

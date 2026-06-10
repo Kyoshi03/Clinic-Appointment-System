@@ -42,6 +42,18 @@ define('DB_NAME', dbConfigValue($productionConfig, 'name', 'DB_NAME', 'clinic1_d
 define('DB_HAS_PRODUCTION_CONFIG', $hasProductionConfig);
 define('DB_ENVIRONMENT', $isLiveHost ? 'hosting' : 'local');
 
+function dbHasPlaceholderCredentials(): bool {
+    $password = trim(DB_PASS);
+    return DB_ENVIRONMENT === 'hosting'
+        && (
+            $password === ''
+            || stripos($password, 'PALITAN_MO') !== false
+            || stripos($password, 'HOSTINGER_DATABASE_PASSWORD') !== false
+            || stripos($password, 'your_hostinger') !== false
+            || stripos($password, 'MYSQL_PASSWORD_HERE') !== false
+        );
+}
+
 function renderDatabaseSetupError(string $title, string $message): void {
     http_response_code(500);
     $safeTitle = htmlspecialchars($title, ENT_QUOTES, 'UTF-8');
@@ -49,6 +61,9 @@ function renderDatabaseSetupError(string $title, string $message): void {
     $safeDb = htmlspecialchars(DB_NAME, ENT_QUOTES, 'UTF-8');
     $safeUser = htmlspecialchars(DB_USER, ENT_QUOTES, 'UTF-8');
     $safeHost = htmlspecialchars(DB_HOST, ENT_QUOTES, 'UTF-8');
+    $settingsDetails = DB_ENVIRONMENT === 'hosting'
+        ? '<p>For security, database credentials are hidden on the live website.</p>'
+        : "<p>Host: <code>{$safeHost}</code><br>User: <code>{$safeUser}</code><br>Database: <code>{$safeDb}</code></p>";
 
     echo <<<HTML
 <!DOCTYPE html>
@@ -71,8 +86,8 @@ function renderDatabaseSetupError(string $title, string $message): void {
         <h1>{$safeTitle}</h1>
         <p>{$safeMessage}</p>
         <div class="hint">
-            <p><strong>Hosting database settings currently loaded:</strong></p>
-            <p>Host: <code>{$safeHost}</code><br>User: <code>{$safeUser}</code><br>Database: <code>{$safeDb}</code></p>
+            <p><strong>Database configuration:</strong></p>
+            {$settingsDetails}
             <p>Create or update <code>config/production.php</code> with the exact Hostinger database name, user, password, and host.</p>
         </div>
     </main>
@@ -93,6 +108,13 @@ function getDBConnection() {
         );
     }
 
+    if (dbHasPlaceholderCredentials()) {
+        renderDatabaseSetupError(
+            'Hostinger database password required',
+            'The production database password has not been configured. In Hostinger hPanel, open Databases > Management, reset or copy the password for the assigned MySQL user, then place that exact password in config/production.php.'
+        );
+    }
+
     $conn = @new mysqli(DB_HOST, DB_USER, DB_PASS, DB_NAME);
     
     if ($conn->connect_error) {
@@ -107,9 +129,12 @@ function getDBConnection() {
         }
 
         if ($conn->connect_error) {
+            $connectionMessage = DB_ENVIRONMENT === 'hosting'
+                ? 'The hosting database rejected the configured credentials. Confirm that the MySQL username, database name, and database-user password in config/production.php exactly match Hostinger hPanel.'
+                : 'The system could not connect to the database: ' . $conn->connect_error;
             renderDatabaseSetupError(
                 'Database connection failed',
-                'The system could not connect to the database: ' . $conn->connect_error
+                $connectionMessage
             );
         }
     }
@@ -291,7 +316,7 @@ function dbColumnExists($conn, $table, $column) {
 
 function initLabBookingSchema($conn) {
     $apptCols = [
-        ['booking_type', "ENUM('package','individual') DEFAULT NULL", 'notes'],
+        ['booking_type', "ENUM('package','individual','consultation') DEFAULT NULL", 'notes'],
         ['total_display_price', 'DECIMAL(10,2) DEFAULT NULL', 'booking_type'],
         ['price_channel', "ENUM('opd','home') DEFAULT 'opd'", 'total_display_price'],
     ];
@@ -301,6 +326,19 @@ function initLabBookingSchema($conn) {
             $conn->query("ALTER TABLE appointments ADD COLUMN `{$col[0]}` {$col[1]} {$after}");
         }
     }
+    $bookingTypeColumn = $conn->query("SHOW COLUMNS FROM appointments LIKE 'booking_type'");
+    $bookingTypeDefinition = $bookingTypeColumn ? $bookingTypeColumn->fetch_assoc() : null;
+    if (
+        $bookingTypeDefinition
+        && stripos((string) ($bookingTypeDefinition['Type'] ?? ''), 'consultation') === false
+    ) {
+        $conn->query("ALTER TABLE appointments MODIFY COLUMN booking_type ENUM('package','individual','consultation') DEFAULT NULL");
+    }
+    $conn->query(
+        "UPDATE appointments
+         SET notes = REPLACE(notes, 'Est. total:', 'Total:')
+         WHERE notes LIKE '%Est. total:%'"
+    );
     
     $conn->query("CREATE TABLE IF NOT EXISTS lab_services (
         id INT AUTO_INCREMENT PRIMARY KEY,

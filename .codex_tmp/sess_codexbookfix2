@@ -1,0 +1,1 @@
+user_id|i:6;username|s:8:"patient1";user_role|s:7:"patient";role|s:7:"patient";full_name|s:14:"Junnie Abrador";lab_booking|a:8:{s:4:"step";i:1;s:4:"type";N;s:11:"service_ids";a:0:{}s:9:"doctor_id";N;s:13:"price_channel";s:3:"opd";s:16:"appointment_date";s:0:"";s:16:"appointment_time";s:0:"";s:14:"calendar_ready";b:0;}

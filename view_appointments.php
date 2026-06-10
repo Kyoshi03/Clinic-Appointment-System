@@ -137,7 +137,10 @@ $additionalStyles = patientAvatarStyles() . '
     .patients-toolbar{display:flex;flex-wrap:wrap;gap:12px;align-items:center;margin-bottom:16px}
     .patients-toolbar input{flex:1;min-width:200px;padding:10px 14px;border:2px solid #e0e0e0;border-radius:10px;font:inherit}
     .patients-toolbar span{color:#555;font-size:.9rem;font-weight:600}
-    .patients-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px}
+    .patients-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px;max-height:260px;overflow:auto;padding-right:8px;scrollbar-width:thin;scrollbar-color:#9fc5d8 #edf5f8}
+    .patients-grid::-webkit-scrollbar,.appointments-scroll::-webkit-scrollbar{width:9px;height:9px}
+    .patients-grid::-webkit-scrollbar-thumb,.appointments-scroll::-webkit-scrollbar-thumb{background:#9fc5d8;border-radius:999px}
+    .patients-grid::-webkit-scrollbar-track,.appointments-scroll::-webkit-scrollbar-track{background:#edf5f8;border-radius:999px}
     .patient-card-item{display:flex;align-items:center;gap:12px;border:1px solid #e6eef5;border-radius:12px;padding:12px 14px;background:#f8fbff;text-decoration:none;color:inherit;transition:border-color .2s,box-shadow .2s}
     .patient-card-item:hover{border-color:#48cae4;box-shadow:0 4px 14px rgba(0,119,182,.12)}
     .patient-card-meta{display:flex;flex-direction:column;gap:2px;min-width:0}
@@ -155,12 +158,17 @@ $additionalStyles = patientAvatarStyles() . '
         padding: 40px 20px;
     }
     .page-header {
-        background: linear-gradient(135deg, #0077b6 0%, #48cae4 100%);
-        border-radius: 20px;
+        background: #073b4c;
+        border-radius: 8px;
         padding: 40px;
         margin-bottom: 40px;
         color: #fff;
-        box-shadow: 0 10px 40px rgba(0, 119, 182, 0.2);
+        box-shadow: 0 14px 34px rgba(7, 59, 76, 0.18);
+    }
+    .page-header.patient-page-header {
+        background: #073b4c;
+        border-radius: 8px;
+        box-shadow: 0 14px 34px rgba(7, 59, 76, 0.18);
     }
     .page-header h2 {
         margin: 0 0 10px 0;
@@ -294,13 +302,24 @@ $additionalStyles = patientAvatarStyles() . '
         border-radius: 20px;
         padding: 30px;
         box-shadow: 0 5px 25px rgba(0, 0, 0, 0.08);
-        overflow-x: auto;
+        overflow: hidden;
+    }
+    .appointments-scroll {
+        max-height: 620px;
+        overflow: auto;
+        padding-right: 8px;
+        scrollbar-width: thin;
+        scrollbar-color: #9fc5d8 #edf5f8;
     }
     .appointments-table {
         width: 100%;
+        min-width: 940px;
         border-collapse: collapse;
     }
     .appointments-table th {
+        position: sticky;
+        top: 0;
+        z-index: 3;
         background: #f8f9fa;
         color: #0077b6;
         padding: 15px;
@@ -314,6 +333,9 @@ $additionalStyles = patientAvatarStyles() . '
     }
     .appointments-table tr:hover {
         background: #f8f9fa;
+    }
+    .appointments-table tbody tr:last-child td {
+        border-bottom: 0;
     }
     .status-badge {
         padding: 6px 14px;
@@ -457,8 +479,12 @@ $additionalStyles = patientAvatarStyles() . '
         .appointments-table-wrapper {
             padding: 15px;
         }
+        .appointments-scroll {
+            max-height: 560px;
+        }
         .appointments-table {
             font-size: 0.9rem;
+            min-width: 860px;
         }
         .appointments-table th,
         .appointments-table td {
@@ -478,7 +504,7 @@ include 'includes/header.php';
 ?>
 
 <div class="appointments-container">
-    <div class="page-header">
+    <div class="page-header<?php echo $userRole === 'patient' ? ' patient-page-header' : ''; ?>">
         <h2>Appointments</h2>
         <p><?php echo $userRole === 'patient' ? 'View your bookings, check the status, and open details anytime.' : 'Track appointments, review patient details, and update visit status from one place.'; ?></p>
         <div class="appointment-actions-top">
@@ -596,7 +622,7 @@ include 'includes/header.php';
     <?php endif; ?>
 
     <?php if ($userRole === 'patient'): ?>
-        <a href="book_appointment.php" class="add-appointment-btn">
+        <a href="book_appointment.php?start=1" class="add-appointment-btn">
             <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
             </svg>
@@ -613,7 +639,7 @@ include 'includes/header.php';
                 <h3>No Appointments Found</h3>
                 <p><?php echo $userRole === 'patient' ? 'You don\'t have any appointments yet.' : 'There are no appointments in the system.'; ?></p>
                 <?php if ($userRole === 'patient'): ?>
-                    <a href="book_appointment.php" class="add-appointment-btn" style="margin-top: 20px;">Book Your First Appointment</a>
+                    <a href="book_appointment.php?start=1" class="add-appointment-btn" style="margin-top: 20px;">Book Your First Appointment</a>
                 <?php endif; ?>
             </div>
         <?php else: ?>
@@ -639,23 +665,24 @@ include 'includes/header.php';
                 <button type="button" class="filter-reset-btn" id="appointmentFilterReset">Reset</button>
             </div>
             <p class="appointment-result-count" id="appointmentResultCount"><?php echo count($appointments); ?> appointment<?php echo count($appointments) === 1 ? '' : 's'; ?> shown</p>
-            <table class="appointments-table">
-                <thead>
-                    <tr>
-                        <?php if ($userRole !== 'patient'): ?>
-                            <th>Patient</th>
-                        <?php endif; ?>
-                        <?php if ($userRole === 'receptionist' || $userRole === 'admin'): ?>
-                            <th>Doctor</th>
-                        <?php endif; ?>
-                        <th>Date</th>
-                        <th>Time</th>
-                        <th>Status</th>
-                        <th>Notes</th>
-                        <th>Actions</th>
-                    </tr>
-                </thead>
-                <tbody>
+            <div class="appointments-scroll" aria-label="Scrollable appointments list">
+                <table class="appointments-table">
+                    <thead>
+                        <tr>
+                            <?php if ($userRole !== 'patient'): ?>
+                                <th>Patient</th>
+                            <?php endif; ?>
+                            <?php if ($userRole === 'receptionist' || $userRole === 'admin'): ?>
+                                <th>Doctor</th>
+                            <?php endif; ?>
+                            <th>Date</th>
+                            <th>Time</th>
+                            <th>Status</th>
+                            <th>Notes</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
                     <?php foreach ($appointments as $appointment): ?>
                         <?php
                         $appDate = new DateTime($appointment['appointment_date']);
@@ -668,23 +695,23 @@ include 'includes/header.php';
                             : 'staff_patient.php?id=' . (int) ($appointment['patient_id'] ?? 0);
                         $notesFull = trim((string) ($appointment['notes'] ?? ''));
                         $servicesText = 'Not listed';
-                        if (preg_match('/Services:\s*(.*?)(?:\s*\|\s*Channel:|\s*$)/i', $notesFull, $matches)) {
+                        if (preg_match('/Services:\s*(.*?)(?:\s*\|\s*(?:Channel:|(?:Est\.\s*)?Total:)|\s*$)/i', $notesFull, $matches)) {
                             $servicesText = trim($matches[1]) !== '' ? trim($matches[1]) : 'Not listed';
                         }
-                        $channelText = strtoupper((string) ($appointment['price_channel'] ?? ''));
-                        if ($channelText === '') {
-                            if (preg_match('/Channel:\s*([^|]+)/i', $notesFull, $matches)) {
-                                $channelText = strtoupper(trim($matches[1]));
-                            } else {
-                                $channelText = 'N/A';
-                            }
-                        }
-                        $estimatedTotal = isset($appointment['total_display_price']) && $appointment['total_display_price'] !== null
+                        $totalAmount = isset($appointment['total_display_price']) && $appointment['total_display_price'] !== null
                             ? 'PHP ' . number_format((float) $appointment['total_display_price'], 2)
                             : 'N/A';
                         $bookingType = isset($appointment['booking_type']) && $appointment['booking_type'] !== null && $appointment['booking_type'] !== ''
                             ? ucfirst((string) $appointment['booking_type'])
                             : 'N/A';
+                        if (($appointment['booking_type'] ?? '') === 'consultation') {
+                            $bookingType = 'Doctor consultation';
+                            $servicesText = 'Doctor consultation';
+                        } elseif (($appointment['booking_type'] ?? '') === 'package') {
+                            $bookingType = 'Laboratory package';
+                        } elseif (($appointment['booking_type'] ?? '') === 'individual') {
+                            $bookingType = 'Laboratory tests';
+                        }
                         $statusValue = strtolower((string) ($appointment['status'] ?? 'pending'));
                         $searchText = trim(implode(' ', [
                             '#' . (int) ($appointment['id'] ?? 0),
@@ -695,7 +722,6 @@ include 'includes/header.php';
                             $statusValue,
                             $notesFull,
                             $servicesText,
-                            $channelText,
                             $bookingType,
                         ]));
                         $detailPayload = [
@@ -708,8 +734,7 @@ include 'includes/header.php';
                             'status' => ucfirst($statusValue),
                             'statusKey' => $statusValue,
                             'bookingType' => $bookingType,
-                            'channel' => $channelText,
-                            'estimatedTotal' => $estimatedTotal,
+                            'totalAmount' => $totalAmount,
                             'services' => $servicesText,
                             'notes' => $notesFull !== '' ? $notesFull : 'None',
                         ];
@@ -782,8 +807,9 @@ include 'includes/header.php';
                             </td>
                         </tr>
                     <?php endforeach; ?>
-                </tbody>
-            </table>
+                    </tbody>
+                </table>
+            </div>
             <div class="filter-empty" id="appointmentFilterEmpty">
                 <strong>No appointments match your filters.</strong>
                 <span>Try another status, date, or search keyword.</span>
@@ -880,7 +906,7 @@ include 'includes/header.php';
             detailSummary.innerHTML = [
                 ['Reference', data.reference],
                 ['Status', data.status],
-                ['Estimated total', data.estimatedTotal]
+                ['Total', data.totalAmount]
             ].map(function(item) {
                 return '<div class="detail-pill"><span>' + item[0] + '</span><strong>' + escapeHtml(item[1]) + '</strong></div>';
             }).join('');
@@ -891,7 +917,6 @@ include 'includes/header.php';
             ['Date', data.date],
             ['Time', data.time],
             ['Booking type', data.bookingType],
-            ['Channel', data.channel],
             ['Services', data.services]
         ];
         detailGrid.innerHTML = items.map(function(item) {

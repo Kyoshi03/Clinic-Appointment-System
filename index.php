@@ -1394,7 +1394,7 @@ include 'includes/header.php';
         <div class="container patient-login-grid">
             <button type="button" class="modal-close-btn" data-login-close aria-label="Close login">&times;</button>
             <div class="patient-login-copy">
-                <h3 id="patient-login-title">Welcome back</h3>
+                <h3 id="patient-login-title">Welcome!</h3>
                 <p>
                     Enter your username and password. No need to choose a role;
                     Globalife will open the correct dashboard for your account.
@@ -1439,7 +1439,7 @@ include 'includes/header.php';
                     <div class="patient-ready-actions">
                         <a href="<?php echo htmlspecialchars($currentUserDashboard); ?>" class="cta-btn">Go to Dashboard</a>
                         <?php if ($isPatientLoggedIn): ?>
-                            <a href="book_appointment.php" class="secondary-btn">Book Appointment</a>
+                            <a href="book_appointment.php?start=1" class="secondary-btn">Book Appointment</a>
                         <?php endif; ?>
                     </div>
                 </div>
@@ -1509,4 +1509,3 @@ include 'includes/header.php';
         </div>
     </section>
 <?php include 'includes/footer.php'; ?>
-

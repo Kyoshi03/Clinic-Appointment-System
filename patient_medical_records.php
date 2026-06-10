@@ -103,9 +103,9 @@ body{background:#f3f7fa;color:#183b4d}
 .records-page{max-width:1180px;margin:0 auto;padding:26px 22px 50px}
 .records-back{display:inline-flex;align-items:center;gap:7px;margin-bottom:16px;color:#0878b8;font-weight:800;text-decoration:none}
 .records-back:hover{text-decoration:underline}
-.records-intro{display:flex;align-items:flex-end;justify-content:space-between;gap:24px;padding:4px 0 22px;border-bottom:1px solid #d7e4eb}
-.records-intro h1{margin:0 0 7px;color:#073b4c;font-size:2rem;line-height:1.18}
-.records-intro p{max-width:640px;margin:0;color:#5b7280;line-height:1.6}
+.records-intro{display:flex;align-items:flex-end;justify-content:space-between;gap:24px;padding:26px 30px;border:0;border-radius:8px;background:#073b4c;box-shadow:0 14px 34px rgba(7,59,76,.18)}
+.records-intro h1{margin:0 0 7px;color:#fff;font-size:2rem;line-height:1.18}
+.records-intro p{max-width:640px;margin:0;color:rgba(255,255,255,.82);line-height:1.6}
 .records-summary{display:grid;grid-template-columns:repeat(3,minmax(116px,1fr));gap:1px;overflow:hidden;border:1px solid #d4e3eb;border-radius:8px;background:#d4e3eb}
 .record-stat{min-width:120px;padding:13px 16px;background:#fff}
 .record-stat span{display:block;color:#657b88;font-size:.75rem;font-weight:800;text-transform:uppercase}
@@ -259,7 +259,15 @@ include 'includes/header.php';
                                 <tr>
                                     <td class="primary-cell"><?php echo htmlspecialchars(patient_record_date($appointment['appointment_date'])); ?></td>
                                     <td><?php echo htmlspecialchars(patient_record_time($appointment['appointment_time'])); ?></td>
-                                    <td class="type-label"><?php echo htmlspecialchars($appointment['booking_type'] ?: 'General'); ?></td>
+                                    <?php
+                                    $recordBookingType = (string) ($appointment['booking_type'] ?? '');
+                                    $recordBookingLabel = [
+                                        'consultation' => 'Doctor consultation',
+                                        'package' => 'Laboratory package',
+                                        'individual' => 'Laboratory tests',
+                                    ][$recordBookingType] ?? 'General appointment';
+                                    ?>
+                                    <td class="type-label"><?php echo htmlspecialchars($recordBookingLabel); ?></td>
                                     <td class="<?php echo empty($appointment['doctor_name']) ? 'muted-cell' : ''; ?>">
                                         <?php echo htmlspecialchars($appointment['doctor_name'] ?: 'Not assigned'); ?>
                                     </td>

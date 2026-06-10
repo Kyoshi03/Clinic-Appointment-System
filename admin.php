@@ -4,6 +4,7 @@ checkRole('admin');
 
 require_once 'config/database.php';
 require_once __DIR__ . '/includes/patient_profile_photo.php';
+require_once __DIR__ . '/includes/admin_notifications.php';
 
 $pageTitle = 'Administrator Dashboard | Globalife Medical Laboratory & Polyclinic';
 $currentUser = getCurrentUser();
@@ -49,6 +50,7 @@ function admin_short_text(?string $text, int $limit = 64): string {
 }
 
 $conn = getDBConnection();
+init_admin_notifications($conn);
 if (
     function_exists('initLabBookingSchema') &&
     (
@@ -64,37 +66,10 @@ $message = $_SESSION['success'] ?? '';
 $error = $_SESSION['error'] ?? '';
 unset($_SESSION['success'], $_SESSION['error']);
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['admin_user_action'])) {
-    $action = $_POST['admin_user_action'];
-
-    if ($action === 'add_staff') {
-        $username = trim((string) ($_POST['username'] ?? ''));
-        $password = (string) ($_POST['password'] ?? '');
-        $fullName = trim((string) ($_POST['full_name'] ?? ''));
-        $role = trim((string) ($_POST['role'] ?? ''));
-        $email = trim((string) ($_POST['email'] ?? ''));
-        $phone = trim((string) ($_POST['phone'] ?? ''));
-        $allowedStaffRoles = ['admin', 'nurse', 'receptionist'];
-
-        if ($username === '' || $password === '' || $fullName === '' || !in_array($role, $allowedStaffRoles, true)) {
-            $_SESSION['error'] = 'Please complete username, password, full name, and staff role.';
-        } else {
-            $hash = password_hash($password, PASSWORD_DEFAULT);
-            $stmt = $conn->prepare('INSERT INTO users (username, password, full_name, role, email, phone, is_active) VALUES (?, ?, ?, ?, ?, ?, 1)');
-            $stmt->bind_param('ssssss', $username, $hash, $fullName, $role, $email, $phone);
-
-            if ($stmt->execute()) {
-                $_SESSION['success'] = 'Staff account created.';
-            } else {
-                $_SESSION['error'] = $conn->errno === 1062 ? 'Username already exists.' : 'Failed to create staff account.';
-            }
-
-            $stmt->close();
-        }
-    }
-
-    $conn->close();
-    header('Location: admin.php#user-directory');
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['mark_admin_notifications_read'])) {
+    $conn->query('UPDATE admin_notifications SET read_at = NOW() WHERE read_at IS NULL');
+    $_SESSION['success'] = 'Notifications marked as read.';
+    header('Location: admin.php');
     exit();
 }
 
@@ -184,15 +159,6 @@ $upcomingStmt->execute();
 $upcomingAppointments = $upcomingStmt->get_result()->fetch_all(MYSQLI_ASSOC);
 $upcomingStmt->close();
 
-$users = [];
-$userResult = $conn->query("SELECT id, username, full_name, role, email, phone, profile_photo, profile_updated_at, COALESCE(is_active, 1) AS is_active
-                            FROM users
-                            ORDER BY FIELD(role, 'admin', 'doctor', 'nurse', 'receptionist', 'patient'), full_name ASC
-                            LIMIT 120");
-if ($userResult) {
-    $users = $userResult->fetch_all(MYSQLI_ASSOC);
-}
-
 $activeDoctors = admin_count_query($conn, "SELECT COUNT(*) AS total FROM users WHERE role = 'doctor' AND COALESCE(is_active, 1) = 1");
 $inactiveDoctors = max(0, $roleCounts['doctor'] - $activeDoctors);
 $activeLabServices = admin_count_query($conn, 'SELECT COUNT(*) AS total FROM lab_services WHERE is_active = 1');
@@ -201,6 +167,18 @@ $packages = admin_count_query($conn, 'SELECT COUNT(*) AS total FROM lab_services
 $individualTests = admin_count_query($conn, 'SELECT COUNT(*) AS total FROM lab_services WHERE is_package = 0');
 $medicalRecordCount = admin_count_query($conn, 'SELECT COUNT(*) AS total FROM medical_records');
 $labResultCount = admin_count_query($conn, 'SELECT COUNT(*) AS total FROM lab_result_entries');
+
+$adminNotifications = [];
+$notificationResult = $conn->query(
+    "SELECT id, notification_type, title, message, related_user_id, created_at, read_at
+     FROM admin_notifications
+     ORDER BY created_at DESC
+     LIMIT 8"
+);
+if ($notificationResult) {
+    $adminNotifications = $notificationResult->fetch_all(MYSQLI_ASSOC);
+}
+$unreadNotificationCount = admin_count_query($conn, 'SELECT COUNT(*) AS total FROM admin_notifications WHERE read_at IS NULL');
 
 $conn->close();
 
@@ -211,7 +189,6 @@ $openAppointments = $appointmentStatus['pending'] + $appointmentStatus['confirme
 $staffTotal = $roleCounts['admin'] + $roleCounts['doctor'] + $roleCounts['nurse'] + $roleCounts['receptionist'];
 
 $additionalStyles = patientAvatarStyles() . '
-.user-row{display:flex;align-items:center;gap:14px}
 body {
     background: #f4f8fb;
     color: #1f343d;
@@ -221,6 +198,11 @@ body {
     max-width: 1180px;
     margin: 0 auto;
     padding: 28px 20px 46px;
+}
+
+.admin-wrap > section {
+    padding-top: 0;
+    padding-bottom: 0;
 }
 
 .admin-hero {
@@ -235,8 +217,6 @@ body {
 .hero-side,
 .metric-card,
 .panel,
-.action-card,
-.user-row,
 .activity-item {
     border: 1px solid #dce8ef;
     border-radius: 8px;
@@ -318,6 +298,63 @@ body {
     background: #fff0f0;
     color: #9d1c2c;
     border: 1px solid #ffd0d5;
+}
+
+.notification-panel {
+    margin-bottom: 16px;
+    padding: 20px;
+}
+
+.notification-count {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 28px;
+    height: 28px;
+    border-radius: 999px;
+    background: #0f7cc2;
+    color: #fff;
+    padding: 0 8px;
+    font-size: 0.8rem;
+    font-weight: 900;
+}
+
+.notification-list {
+    display: grid;
+    gap: 8px;
+    max-height: 260px;
+    overflow-y: auto;
+    padding-right: 4px;
+}
+
+.notification-item {
+    border: 1px solid #dce8ef;
+    border-left: 4px solid #9fb5c2;
+    border-radius: 8px;
+    background: #fff;
+    padding: 12px 14px;
+}
+
+.notification-item.unread {
+    border-left-color: #0f7cc2;
+    background: #f3f9fd;
+}
+
+.notification-item strong {
+    display: block;
+    color: #073b4c;
+}
+
+.notification-item p {
+    margin: 4px 0;
+    color: #4f6672;
+    line-height: 1.45;
+}
+
+.notification-item time {
+    color: #71838d;
+    font-size: 0.8rem;
+    font-weight: 700;
 }
 
 .metrics-grid {
@@ -417,38 +454,6 @@ body {
     background: #eef7ff;
     border-color: #d4e6f5;
     color: #0b4f80;
-}
-
-.quick-grid {
-    display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 12px;
-    margin-bottom: 16px;
-}
-
-.action-card {
-    padding: 16px;
-    color: inherit;
-    text-decoration: none;
-    display: grid;
-    gap: 6px;
-}
-
-.action-card span {
-    color: #60727d;
-    font-size: 0.78rem;
-    font-weight: 900;
-    text-transform: uppercase;
-}
-
-.action-card strong {
-    color: #073b4c;
-    font-size: 1.02rem;
-}
-
-.action-card small {
-    color: #60727d;
-    line-height: 1.4;
 }
 
 .status-grid {
@@ -573,82 +578,6 @@ body {
     font-size: 1.3rem;
 }
 
-.user-toolbar {
-    display: grid;
-    grid-template-columns: minmax(220px, 1fr) minmax(150px, 220px);
-    gap: 10px;
-    margin-bottom: 14px;
-}
-
-.staff-form {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 10px;
-    margin-bottom: 16px;
-    padding: 14px;
-    border: 1px solid #e0ebf3;
-    border-radius: 8px;
-    background: #f8fbff;
-}
-
-.staff-form .wide {
-    grid-column: span 2;
-}
-
-input,
-select {
-    width: 100%;
-    box-sizing: border-box;
-    min-height: 40px;
-    border: 1px solid #d4e6f5;
-    border-radius: 8px;
-    background: #fff;
-    color: #1f343d;
-    font: inherit;
-    padding: 9px 10px;
-}
-
-input:focus,
-select:focus {
-    border-color: #0f7cc2;
-    box-shadow: 0 0 0 4px rgba(15, 124, 194, 0.1);
-    outline: none;
-}
-
-.user-list {
-    display: grid;
-    gap: 9px;
-    max-height: 520px;
-    overflow: auto;
-    padding-right: 4px;
-}
-
-.user-row {
-    padding: 13px;
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    gap: 12px;
-    align-items: center;
-}
-
-.user-row.hidden {
-    display: none;
-}
-
-.user-name {
-    color: #073b4c;
-    font-weight: 900;
-}
-
-.user-meta {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px 12px;
-    color: #60727d;
-    font-size: 0.88rem;
-    margin-top: 5px;
-}
-
 .empty-state {
     border: 1px dashed #bdd7ea;
     border-radius: 8px;
@@ -664,8 +593,7 @@ select:focus {
 @media (max-width: 980px) {
     .admin-hero,
     .main-grid,
-    .metrics-grid,
-    .quick-grid {
+    .metrics-grid {
         grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
@@ -682,16 +610,8 @@ select:focus {
     .admin-hero,
     .main-grid,
     .metrics-grid,
-    .quick-grid,
-    .health-grid,
-    .user-toolbar,
-    .staff-form,
-    .user-row {
+    .health-grid {
         grid-template-columns: 1fr;
-    }
-
-    .staff-form .wide {
-        grid-column: auto;
     }
 
     .status-row {
@@ -702,42 +622,6 @@ select:focus {
         width: 100%;
     }
 }
-';
-
-$additionalScripts = '
-document.addEventListener("DOMContentLoaded", function () {
-    const searchInput = document.getElementById("userSearch");
-    const roleFilter = document.getElementById("userRoleFilter");
-    const noMatches = document.getElementById("userNoMatches");
-
-    function filterUsers() {
-        const query = (searchInput && searchInput.value ? searchInput.value : "").toLowerCase().trim();
-        const role = roleFilter ? roleFilter.value : "";
-        let visible = 0;
-
-        document.querySelectorAll("[data-user-row]").forEach(function (row) {
-            const haystack = (row.getAttribute("data-search") || "").toLowerCase();
-            const rowRole = row.getAttribute("data-role") || "";
-            const show = (!query || haystack.indexOf(query) !== -1) && (!role || rowRole === role);
-            row.classList.toggle("hidden", !show);
-            if (show) {
-                visible++;
-            }
-        });
-
-        if (noMatches) {
-            noMatches.classList.toggle("hidden", visible !== 0);
-        }
-    }
-
-    if (searchInput) {
-        searchInput.addEventListener("input", filterUsers);
-    }
-    if (roleFilter) {
-        roleFilter.addEventListener("change", filterUsers);
-    }
-    filterUsers();
-});
 ';
 
 include 'includes/header.php';
@@ -763,6 +647,35 @@ include 'includes/header.php';
         <div class="message error"><?php echo htmlspecialchars($error); ?></div>
     <?php endif; ?>
 
+    <section class="panel notification-panel">
+        <div class="panel-head">
+            <div>
+                <h2>Admin notifications <span class="notification-count"><?php echo $unreadNotificationCount; ?></span></h2>
+                <p>Verified patient accounts created online or from the reception desk QR code.</p>
+            </div>
+            <?php if ($unreadNotificationCount > 0): ?>
+                <form method="post">
+                    <button class="btn secondary" type="submit" name="mark_admin_notifications_read" value="1">Mark all as read</button>
+                </form>
+            <?php endif; ?>
+        </div>
+        <?php if (empty($adminNotifications)): ?>
+            <div class="empty-state">No account notifications yet.</div>
+        <?php else: ?>
+            <div class="notification-list">
+                <?php foreach ($adminNotifications as $notification): ?>
+                    <article class="notification-item <?php echo empty($notification['read_at']) ? 'unread' : ''; ?>">
+                        <strong><?php echo htmlspecialchars($notification['title']); ?></strong>
+                        <p><?php echo htmlspecialchars($notification['message']); ?></p>
+                        <time datetime="<?php echo htmlspecialchars($notification['created_at']); ?>">
+                            <?php echo htmlspecialchars(date('M d, Y g:i A', strtotime($notification['created_at']))); ?>
+                        </time>
+                    </article>
+                <?php endforeach; ?>
+            </div>
+        <?php endif; ?>
+    </section>
+
     <section class="metrics-grid" aria-label="System overview">
         <div class="metric-card">
             <span>Total users</span>
@@ -784,29 +697,6 @@ include 'includes/header.php';
             <strong><?php echo $medicalRecordCount + $labResultCount; ?></strong>
             <small><?php echo $medicalRecordCount; ?> notes, <?php echo $labResultCount; ?> labs</small>
         </div>
-    </section>
-
-    <section class="quick-grid" aria-label="Quick admin actions">
-        <a class="action-card" href="#user-directory">
-            <span>Users</span>
-            <strong>User directory</strong>
-            <small>Search staff and patient accounts.</small>
-        </a>
-        <a class="action-card" href="view_appointments.php">
-            <span>Appointments</span>
-            <strong>Appointment control</strong>
-            <small>Monitor and update booking statuses.</small>
-        </a>
-        <a class="action-card" href="admin_lab_services.php">
-            <span>Laboratory</span>
-            <strong>Lab services</strong>
-            <small>Manage packages, prices, and active services.</small>
-        </a>
-        <a class="action-card" href="admin_doctors.php">
-            <span>Doctors</span>
-            <strong>Doctor accounts</strong>
-            <small>Manage profiles, active status, and clinic hours.</small>
-        </a>
     </section>
 
     <section class="main-grid">
@@ -907,12 +797,20 @@ include 'includes/header.php';
             <?php else: ?>
                 <div class="activity-list">
                     <?php foreach ($recentAppointments as $appointment): ?>
+                        <?php
+                        $adminBookingType = (string) ($appointment['booking_type'] ?? '');
+                        $adminBookingLabel = [
+                            'consultation' => 'Doctor consultation',
+                            'package' => 'Laboratory package',
+                            'individual' => 'Laboratory tests',
+                        ][$adminBookingType] ?? 'General appointment';
+                        ?>
                         <div class="activity-item" style="display:flex;align-items:flex-start;gap:10px">
                             <?php echo renderPatientAvatar($appointment, ['size' => 'sm', 'link' => true, 'patient_id' => (int) ($appointment['patient_id'] ?? 0)]); ?>
                             <div>
                             <strong><?php echo htmlspecialchars($appointment['patient_name']); ?></strong>
                             <span><?php echo htmlspecialchars(admin_date_label($appointment['appointment_date']) . ' ' . admin_time_label($appointment['appointment_time'])); ?></span>
-                            <span><?php echo htmlspecialchars(admin_short_text($appointment['booking_type'] ?: 'General appointment')); ?></span>
+                            <span><?php echo htmlspecialchars(admin_short_text($adminBookingLabel)); ?></span>
                             <span class="badge <?php echo htmlspecialchars($appointment['status']); ?>"><?php echo htmlspecialchars(ucfirst($appointment['status'])); ?></span>
                             </div>
                         </div>
@@ -922,82 +820,5 @@ include 'includes/header.php';
         </div>
     </section>
 
-    <section class="panel" id="user-directory">
-        <div class="panel-head">
-            <div>
-                <h2>User directory</h2>
-                <p>Create staff accounts, then search and review system users. Doctor profile edits are handled in Doctors.</p>
-            </div>
-        </div>
-
-        <form class="staff-form" method="post">
-            <input type="hidden" name="admin_user_action" value="add_staff">
-            <input name="full_name" class="wide" placeholder="Full name" required>
-            <select name="role" required>
-                <option value="">Staff role</option>
-                <option value="admin">Admin</option>
-                <option value="nurse">Nurse</option>
-                <option value="receptionist">Receptionist</option>
-            </select>
-            <input name="username" placeholder="Username" required>
-            <input type="password" name="password" placeholder="Password" required>
-            <input type="email" name="email" placeholder="Email">
-            <input name="phone" placeholder="Phone">
-            <button class="btn" type="submit">Create staff</button>
-        </form>
-
-        <div class="user-toolbar" role="search" aria-label="Filter users">
-            <input type="search" id="userSearch" placeholder="Search name, username, email, or phone">
-            <select id="userRoleFilter" aria-label="Filter user role">
-                <option value="">All roles</option>
-                <option value="admin">Admin</option>
-                <option value="doctor">Doctor</option>
-                <option value="nurse">Nurse</option>
-                <option value="receptionist">Receptionist</option>
-                <option value="patient">Patient</option>
-            </select>
-        </div>
-        <div id="userNoMatches" class="empty-state hidden">No users match your search.</div>
-
-        <?php if (empty($users)): ?>
-            <div class="empty-state">No user accounts found.</div>
-        <?php else: ?>
-            <div class="user-list">
-                <?php foreach ($users as $user): ?>
-                    <?php
-                    $role = (string) $user['role'];
-                    $active = (int) $user['is_active'] === 1;
-                    $searchText = trim(implode(' ', [
-                        $user['full_name'] ?? '',
-                        $user['username'] ?? '',
-                        $user['email'] ?? '',
-                        $user['phone'] ?? '',
-                        $role,
-                    ]));
-                    ?>
-                    <article class="user-row" data-user-row data-role="<?php echo htmlspecialchars($role); ?>" data-search="<?php echo htmlspecialchars($searchText, ENT_QUOTES); ?>">
-                        <?php if ($role === 'patient'): ?>
-                            <?php echo renderPatientAvatar($user, ['size' => 'md', 'link' => true, 'patient_id' => (int) $user['id']]); ?>
-                        <?php endif; ?>
-                        <div>
-                            <div class="user-name"><?php echo htmlspecialchars($user['full_name']); ?></div>
-                            <div class="user-meta">
-                                <span><?php echo htmlspecialchars($user['username']); ?></span>
-                                <?php if (!empty($user['email'])): ?><span><?php echo htmlspecialchars($user['email']); ?></span><?php endif; ?>
-                                <?php if (!empty($user['phone'])): ?><span><?php echo htmlspecialchars($user['phone']); ?></span><?php endif; ?>
-                            </div>
-                        </div>
-                        <div class="user-meta">
-                            <span class="badge active"><?php echo htmlspecialchars(ucfirst($role)); ?></span>
-                            <?php if ($role === 'doctor'): ?>
-                                <span class="badge <?php echo $active ? 'active' : 'inactive'; ?>"><?php echo $active ? 'Active' : 'Inactive'; ?></span>
-                                <a class="btn secondary" href="admin_doctors.php?edit=<?php echo (int) $user['id']; ?>">Edit</a>
-                            <?php endif; ?>
-                        </div>
-                    </article>
-                <?php endforeach; ?>
-            </div>
-        <?php endif; ?>
-    </section>
 </main>
 <?php include 'includes/footer.php'; ?>

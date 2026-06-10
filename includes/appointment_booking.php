@@ -45,9 +45,24 @@ function appointment_fetch_services(mysqli $conn, array $serviceIds): array {
     return $result ? $result->fetch_all(MYSQLI_ASSOC) : [];
 }
 
+function appointment_clinic_is_open_at(string $date, string $time): bool {
+    $timestamp = strtotime($date);
+    if ($timestamp === false) {
+        return false;
+    }
+
+    $dayOfWeek = (int) date('N', $timestamp);
+    if ($dayOfWeek < 1 || $dayOfWeek > 6) {
+        return false;
+    }
+
+    $normalizedTime = substr(trim($time), 0, 5);
+    return $normalizedTime >= '08:00' && $normalizedTime <= '17:00';
+}
+
 function appointment_validate_payload(mysqli $conn, int $patientId, array $payload): array {
     $type = (string) ($payload['type'] ?? '');
-    if (!in_array($type, ['package', 'individual'], true)) {
+    if (!in_array($type, ['package', 'individual', 'consultation'], true)) {
         return ['ok' => false, 'error' => 'The selected appointment type is invalid. Please review your booking again.'];
     }
 
@@ -68,27 +83,67 @@ function appointment_validate_payload(mysqli $conn, int $patientId, array $paylo
     if ($appointmentAt <= $now) {
         return ['ok' => false, 'error' => 'The selected appointment time has already passed. Please choose a future schedule.'];
     }
-
-    $serviceIds = array_values(array_unique(array_filter(
-        array_map('intval', (array) ($payload['service_ids'] ?? [])),
-        static fn ($id) => $id > 0
-    )));
-    $services = appointment_fetch_services($conn, $serviceIds);
-    if (empty($serviceIds) || count($services) !== count($serviceIds)) {
-        return ['ok' => false, 'error' => 'One or more selected services are no longer available. Please review your booking again.'];
+    if (!appointment_clinic_is_open_at($date, $time)) {
+        return ['ok' => false, 'error' => 'The clinic is open Monday to Saturday, from 8:00 AM to 5:00 PM. Please choose a schedule within clinic hours.'];
     }
 
-    foreach ($services as $service) {
-        if (!lab_booking_service_matches_type($service, $type)) {
-            return ['ok' => false, 'error' => 'One of the selected services does not match this booking type.'];
+    $serviceIds = [];
+    $services = [];
+    if ($type !== 'consultation') {
+        $serviceIds = array_values(array_unique(array_filter(
+            array_map('intval', (array) ($payload['service_ids'] ?? [])),
+            static fn ($id) => $id > 0
+        )));
+        $services = appointment_fetch_services($conn, $serviceIds);
+        if (empty($serviceIds) || count($services) !== count($serviceIds)) {
+            return ['ok' => false, 'error' => 'One or more selected services are no longer available. Please review your booking again.'];
+        }
+
+        foreach ($services as $service) {
+            if (!lab_booking_service_matches_type($service, $type)) {
+                return ['ok' => false, 'error' => 'One of the selected services does not match this booking type.'];
+            }
         }
     }
 
-    $doctorId = $type === 'individual' ? (int) ($payload['doctor_id'] ?? 0) : 0;
-    if ($type === 'individual') {
-        if ($doctorId <= 0 || !user_is_doctor_available_at($conn, $doctorId, $date, $time)) {
-            return ['ok' => false, 'error' => 'The selected doctor is no longer available at that time. Please choose another schedule.'];
+    $doctorId = (int) ($payload['doctor_id'] ?? 0);
+    $doctorName = '';
+    if ($type === 'consultation') {
+        if ($doctorId <= 0) {
+            return ['ok' => false, 'error' => 'Please choose a doctor for your consultation.'];
         }
+        $doctorStmt = $conn->prepare(
+            "SELECT full_name FROM users
+             WHERE id = ? AND role = 'doctor' AND COALESCE(is_active, 1) = 1
+             LIMIT 1"
+        );
+        $doctorStmt->bind_param('i', $doctorId);
+        $doctorStmt->execute();
+        $doctor = $doctorStmt->get_result()->fetch_assoc();
+        $doctorStmt->close();
+        if (!$doctor) {
+            return ['ok' => false, 'error' => 'The selected doctor is no longer available. Please choose another doctor.'];
+        }
+        if (!user_is_doctor_available_at($conn, $doctorId, $date, $time)) {
+            return ['ok' => false, 'error' => 'The selected time is outside this doctor\'s clinic schedule. Please choose an available time.'];
+        }
+        $doctorName = (string) $doctor['full_name'];
+
+        $doctorConflict = $conn->prepare(
+            "SELECT id FROM appointments
+             WHERE doctor_id = ? AND appointment_date = ? AND appointment_time = ?
+               AND status != 'cancelled'
+             LIMIT 1"
+        );
+        $doctorConflict->bind_param('iss', $doctorId, $date, $time);
+        $doctorConflict->execute();
+        $doctorConflictRow = $doctorConflict->get_result()->fetch_assoc();
+        $doctorConflict->close();
+        if ($doctorConflictRow) {
+            return ['ok' => false, 'error' => 'This doctor already has an appointment at the selected time. Please choose another time.'];
+        }
+    } else {
+        $doctorId = 0;
     }
 
     $duplicate = $conn->prepare(
@@ -117,24 +172,12 @@ function appointment_validate_payload(mysqli $conn, int $patientId, array $paylo
         return ['ok' => false, 'error' => 'Add a valid email address to your patient profile before booking an appointment.'];
     }
 
-    $channel = $type === 'package'
-        ? 'opd'
-        : (((string) ($payload['price_channel'] ?? 'opd')) === 'home' ? 'home' : 'opd');
-    $serviceNames = [];
+    $channel = 'opd';
+    $serviceNames = $type === 'consultation' ? ['Doctor consultation'] : [];
     $total = 0.0;
     foreach ($services as $service) {
         $serviceNames[] = (string) $service['name'];
         $total += appointment_unit_price($service, $channel);
-    }
-
-    $doctorName = '';
-    if ($doctorId > 0) {
-        $doctorStmt = $conn->prepare("SELECT full_name FROM users WHERE id = ? AND role = 'doctor' LIMIT 1");
-        $doctorStmt->bind_param('i', $doctorId);
-        $doctorStmt->execute();
-        $doctor = $doctorStmt->get_result()->fetch_assoc();
-        $doctorStmt->close();
-        $doctorName = (string) ($doctor['full_name'] ?? '');
     }
 
     return [
@@ -325,14 +368,17 @@ function appointment_email_layout(string $title, string $intro, array $rows, str
 function appointment_send_booking_email(array $details): array {
     $dateLabel = date('F j, Y', strtotime((string) $details['appointment_date']));
     $timeLabel = date('g:i A', strtotime((string) $details['appointment_time']));
+    $isConsultation = ($details['booking_type'] ?? '') === 'consultation';
     $rows = [
         'Reference number' => '#' . (int) $details['appointment_id'],
         'Date' => $dateLabel,
         'Time' => $timeLabel,
         'Services' => implode(', ', (array) $details['service_names']),
-        'Estimated total' => 'PHP ' . number_format((float) $details['total'], 2),
         'Status' => 'Pending clinic confirmation',
     ];
+    $rows['Payment'] = $isConsultation
+        ? 'Consultation fee confirmed at clinic'
+        : 'Total: PHP ' . number_format((float) $details['total'], 2);
     if (!empty($details['doctor_name'])) {
         $rows['Doctor'] = (string) $details['doctor_name'];
     }
@@ -485,9 +531,13 @@ function appointment_verify_and_create(mysqli $conn, int $patientId, int $verifi
 
     $booking = $validated['booking'];
     $serviceNames = $validated['service_names'];
-    $notes = 'Services: ' . implode(', ', $serviceNames)
-        . ' | Channel: ' . strtoupper((string) $booking['price_channel'])
-        . ' | Est. total: PHP ' . number_format((float) $validated['total'], 2);
+    if (($booking['type'] ?? '') === 'consultation') {
+        $notes = 'Doctor consultation with ' . (string) $validated['doctor_name']
+            . ' | Consultation fee confirmed at clinic';
+    } else {
+        $notes = 'Services: ' . implode(', ', $serviceNames)
+            . ' | Total: PHP ' . number_format((float) $validated['total'], 2);
+    }
 
     $conn->begin_transaction();
     try {
@@ -601,6 +651,7 @@ function appointment_verify_and_create(mysqli $conn, int $patientId, int $verifi
         'patient_name' => (string) $validated['patient']['full_name'],
         'email' => (string) $validated['patient']['email'],
         'doctor_name' => (string) $validated['doctor_name'],
+        'booking_type' => (string) $booking['type'],
     ];
     $emailResult = appointment_send_booking_email($details);
 
