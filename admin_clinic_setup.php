@@ -4,6 +4,7 @@ checkRole('admin');
 
 require_once 'config/database.php';
 require_once __DIR__ . '/includes/mailer.php';
+require_once __DIR__ . '/includes/sms.php';
 
 $pageTitle = 'Admin Settings | Globalife Administration';
 $conn = getDBConnection();
@@ -54,6 +55,7 @@ $recentUsers = admin_settings_rows($conn, "SELECT full_name, role, created_at FR
 $conn->close();
 
 $mailConfigured = clinic_mail_ready();
+$smsConfigured = clinic_sms_ready();
 $isHosting = DB_ENVIRONMENT === 'hosting';
 $staffTotal = $roleCounts['admin'] + $roleCounts['doctor'] + $roleCounts['nurse'] + $roleCounts['receptionist'];
 
@@ -67,7 +69,7 @@ $reportCards = [
 $settingsCards = [
     ['tag' => 'Clinic Information', 'title' => 'Clinic profile and readiness', 'text' => 'Review environment, timezone, active doctors, and service availability.', 'href' => '#clinic-information', 'meta' => $isHosting ? 'Production hosting' : 'Local XAMPP'],
     ['tag' => 'Appointment Settings', 'title' => 'Appointment slot settings', 'text' => 'Manage doctor schedules, slot availability, and appointment flow.', 'href' => 'admin_doctors.php', 'meta' => $scheduledDoctors . ' doctors scheduled'],
-    ['tag' => 'Email & OTP Settings', 'title' => 'Email and OTP delivery', 'text' => 'Check SMTP readiness, password reset OTPs, booking verification codes, and reminders.', 'href' => '#email-otp', 'meta' => $mailConfigured ? 'Email ready' : 'Needs setup'],
+    ['tag' => 'Email, SMS & OTP', 'title' => 'Verification delivery', 'text' => 'Check SMTP, SMS verification, password reset codes, booking codes, and reminders.', 'href' => '#email-otp', 'meta' => $mailConfigured && $smsConfigured ? 'Email and SMS ready' : 'Needs setup'],
     ['tag' => 'Staff & Roles', 'title' => 'Staff role management', 'text' => 'Create staff accounts and review admin, nurse, receptionist, and doctor roles.', 'href' => 'admin_accounts.php', 'meta' => $staffTotal . ' staff accounts'],
     ['tag' => 'Security Settings', 'title' => 'Security controls', 'text' => 'Audit login roles, OTP usage, staff access, and database safety reminders.', 'href' => '#security-settings', 'meta' => $activeOtpCodes . ' active reset OTPs'],
     ['tag' => 'Backup & Restore', 'title' => 'Backup and restore database', 'text' => 'Download a SQL backup. Restore should be done manually through phpMyAdmin after review.', 'href' => '#backup-restore', 'meta' => 'SQL backup ready'],
@@ -138,7 +140,7 @@ include 'includes/header.php';
         </div>
         <div class="hero-status">
             <span>System readiness</span>
-            <strong class="status-dot <?php echo $mailConfigured && $scheduledDoctors > 0 ? '' : 'warn'; ?>"><?php echo $mailConfigured && $scheduledDoctors > 0 ? 'Ready for daily operation' : 'Needs review'; ?></strong>
+            <strong class="status-dot <?php echo $mailConfigured && $smsConfigured && $scheduledDoctors > 0 ? '' : 'warn'; ?>"><?php echo $mailConfigured && $smsConfigured && $scheduledDoctors > 0 ? 'Ready for daily operation' : 'Needs review'; ?></strong>
             <small><?php echo $isHosting ? 'Hostinger / Production' : 'Local XAMPP'; ?> | DB timezone <?php echo htmlspecialchars($dbTimezone); ?></small>
         </div>
     </section>
@@ -175,10 +177,11 @@ include 'includes/header.php';
         </div>
 
         <div class="settings-panel" id="email-otp">
-            <h2>Email &amp; OTP Settings</h2>
-            <p>Monitor SMTP, password reset OTPs, appointment verification, and reminder queue.</p>
+            <h2>Email, SMS &amp; OTP Settings</h2>
+            <p>Monitor SMTP, SMS delivery, password reset OTPs, appointment verification, and reminder queue.</p>
             <div class="detail-list">
                 <div class="detail-row"><span>SMTP email delivery</span><strong class="status-dot <?php echo $mailConfigured ? '' : 'warn'; ?>"><?php echo $mailConfigured ? 'Configured' : 'Needs setup'; ?></strong></div>
+                <div class="detail-row"><span>SMS verification delivery</span><strong class="status-dot <?php echo $smsConfigured ? '' : 'warn'; ?>"><?php echo $smsConfigured ? 'Configured' : 'Needs setup'; ?></strong></div>
                 <div class="detail-row"><span>Active password reset OTPs</span><strong><?php echo $activeOtpCodes; ?></strong></div>
                 <div class="detail-row"><span>Active booking OTPs</span><strong><?php echo $activeBookingCodes; ?></strong></div>
                 <div class="detail-row"><span>Pending reminders</span><strong><?php echo $pendingReminders; ?></strong></div>

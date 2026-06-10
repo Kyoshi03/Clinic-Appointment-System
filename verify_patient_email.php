@@ -6,6 +6,7 @@ header('Expires: 0');
 require_once 'includes/session.php';
 require_once 'config/database.php';
 require_once 'includes/mailer.php';
+require_once 'includes/sms.php';
 require_once 'includes/admin_notifications.php';
 
 if (empty($_SESSION['pending_patient_registration']['data'])) {
@@ -15,9 +16,14 @@ if (empty($_SESSION['pending_patient_registration']['data'])) {
 
 $pending = &$_SESSION['pending_patient_registration'];
 $patient = $pending['data'];
+$verificationChannel = ($patient['verification_channel'] ?? 'email') === 'sms' ? 'sms' : 'email';
+$verificationDestination = $verificationChannel === 'sms'
+    ? clinic_sms_mask_phone((string) ($patient['phone'] ?? ''))
+    : registration_mask_email((string) ($patient['email'] ?? ''));
+$verificationLabel = $verificationChannel === 'sms' ? 'mobile number' : 'email';
 $error = '';
 $success = isset($_GET['sent']) && $_GET['sent'] === '1'
-    ? 'We sent a 6-digit verification code to your email.'
+    ? 'We sent a 6-digit verification code to your ' . $verificationLabel . '.'
     : '';
 
 function registration_mask_email(string $email): string {
@@ -44,8 +50,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $error = 'Please wait ' . $wait . ' seconds before requesting another code.';
         } else {
             $code = (string) random_int(100000, 999999);
-            $sent = clinic_send_otp_email(
+            $sent = clinic_send_verification_code(
+                $verificationChannel,
                 (string) $patient['email'],
+                (string) $patient['phone'],
                 (string) $patient['full_name'],
                 $code,
                 'registration'
@@ -58,7 +66,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $pending['expires_at'] = time() + 10 * 60;
                 $pending['sent_at'] = time();
                 $pending['attempts'] = 0;
-                $success = 'A new verification code was sent to your email.';
+                $success = 'A new verification code was sent to your ' . $verificationLabel . '.';
             }
         }
     }
@@ -169,8 +177,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-$maskedEmail = registration_mask_email((string) $patient['email']);
-$pageTitle = 'Verify Email | Globalife Medical Laboratory & Polyclinic';
+$pageTitle = 'Verify Account | Globalife Medical Laboratory & Polyclinic';
 $publicLoginHref = 'index.php#patient-login';
 $publicSignUpHref = 'register_patient.php';
 $additionalStyles = '
@@ -180,7 +187,7 @@ $additionalStyles = '
     .verify-logo { width:70px; height:70px; border-radius:50%; object-fit:cover; border:3px solid #48cae4; margin-bottom:14px; }
     .verify-card h2 { margin:0 0 8px; color:#073b4c; font-size:1.65rem; }
     .verify-card > p { color:#5e7380; line-height:1.6; margin:0 0 20px; }
-    .email-chip { display:inline-block; background:#edf8fd; color:#00699b; border:1px solid #cbe8f5; border-radius:999px; padding:8px 14px; font-weight:700; margin-bottom:20px; }
+    .destination-chip { display:inline-block; max-width:100%; box-sizing:border-box; background:#edf8fd; color:#00699b; border:1px solid #cbe8f5; border-radius:999px; padding:8px 14px; font-weight:700; margin-bottom:20px; overflow-wrap:anywhere; }
     .notice { padding:12px 14px; border-radius:8px; margin-bottom:16px; text-align:left; line-height:1.45; }
     .notice.error { background:#fff0f0; border:1px solid #ffd0d0; color:#8c1d2b; }
     .notice.success { background:#eefaf2; border:1px solid #c7ead2; color:#17652b; }
@@ -197,9 +204,9 @@ include 'includes/header.php';
 <main class="verify-page">
     <section class="verify-card">
         <img src="globalife.png" alt="Globalife" class="verify-logo">
-        <h2>Verify your email</h2>
-        <p>Enter the code sent to your email to finish creating your patient account.</p>
-        <div class="email-chip"><?php echo htmlspecialchars($maskedEmail); ?></div>
+        <h2>Verify your account</h2>
+        <p>Enter the code sent to your <?php echo htmlspecialchars($verificationLabel); ?> to finish creating your patient account.</p>
+        <div class="destination-chip"><?php echo htmlspecialchars($verificationDestination); ?></div>
 
         <?php if ($error): ?>
             <div class="notice error"><?php echo htmlspecialchars($error); ?></div>
@@ -226,7 +233,12 @@ include 'includes/header.php';
             <button type="submit" class="primary-btn">Verify and Create Account</button>
         </form>
 
-        <p class="expiry-note">The code expires after 10 minutes. Check your spam folder if it is not in your inbox.</p>
+        <p class="expiry-note">
+            The code expires after 10 minutes.
+            <?php echo $verificationChannel === 'email'
+                ? 'Check your spam folder if it is not in your inbox.'
+                : 'Check that your mobile number has signal and can receive text messages.'; ?>
+        </p>
 
         <div class="secondary-actions">
             <form method="POST" action="verify_patient_email.php">
@@ -235,7 +247,7 @@ include 'includes/header.php';
             </form>
             <form method="POST" action="verify_patient_email.php">
                 <input type="hidden" name="action" value="cancel">
-                <button type="submit" class="link-btn">Change email</button>
+                <button type="submit" class="link-btn">Change details</button>
             </form>
         </div>
     </section>

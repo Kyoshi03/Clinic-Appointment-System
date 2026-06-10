@@ -25,8 +25,13 @@ if (!$verification || $verification['used_at'] !== null) {
 }
 
 $error = '';
+$verificationChannel = ($verification['verification_channel'] ?? 'email') === 'sms' ? 'sms' : 'email';
+$verificationLabel = $verificationChannel === 'sms' ? 'mobile number' : 'email';
+$verificationDestination = $verificationChannel === 'sms'
+    ? clinic_sms_mask_phone((string) ($verification['phone'] ?? ''))
+    : appointment_mask_email((string) ($verification['email'] ?? ''));
 $success = isset($_GET['sent']) && $_GET['sent'] === '1'
-    ? 'We sent a 6-digit appointment confirmation code to your email.'
+    ? 'We sent a 6-digit appointment confirmation code to your ' . $verificationLabel . '.'
     : '';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -55,7 +60,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $verificationId
         );
         if ($result['ok']) {
-            $success = 'A new appointment confirmation code was sent to your email.';
+            $success = 'A new appointment confirmation code was sent to your ' . $verificationLabel . '.';
             $verification = appointment_get_verification($conn, (int) $currentUser['id'], $verificationId);
         } else {
             $error = (string) $result['error'];
@@ -73,8 +78,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $error = (string) $result['error'];
         } else {
             unset($_SESSION['pending_appointment_verification_id'], $_SESSION['lab_booking']);
-            if (!$result['email_sent']) {
-                $_SESSION['appointment_email_warning'] = 'Your appointment was saved, but the confirmation email could not be delivered. You can still view it in My Appointments.';
+            $failedChannels = [];
+            if (empty($result['email_sent'])) {
+                $failedChannels[] = 'email';
+            }
+            if (empty($result['sms_sent'])) {
+                $failedChannels[] = 'SMS';
+            }
+            if ($failedChannels) {
+                $_SESSION['appointment_email_warning'] = 'Your appointment was saved, but the '
+                    . implode(' and ', $failedChannels)
+                    . ' notification could not be delivered. You can still view the booking in My Appointments.';
             }
             $appointmentId = (int) $result['appointment_id'];
             $conn->close();
@@ -84,7 +98,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-$maskedEmail = appointment_mask_email((string) $verification['email']);
 $conn->close();
 
 $pageTitle = 'Confirm Appointment | Globalife Medical Laboratory & Polyclinic';
@@ -95,7 +108,7 @@ $additionalStyles = '
     .verify-booking-logo { width:72px; height:72px; border-radius:50%; object-fit:cover; border:3px solid #48cae4; margin-bottom:14px; }
     .verify-booking-card h2 { margin:0 0 8px; color:#073b4c; font-size:1.7rem; }
     .verify-booking-card > p { color:#5e7380; line-height:1.6; margin:0 0 20px; }
-    .email-chip { display:inline-block; background:#edf8fd; color:#00699b; border:1px solid #cbe8f5; border-radius:999px; padding:8px 14px; font-weight:700; margin-bottom:20px; }
+    .destination-chip { display:inline-block; max-width:100%; box-sizing:border-box; background:#edf8fd; color:#00699b; border:1px solid #cbe8f5; border-radius:999px; padding:8px 14px; font-weight:700; margin-bottom:20px; overflow-wrap:anywhere; }
     .notice { padding:12px 14px; border-radius:8px; margin-bottom:16px; text-align:left; line-height:1.45; }
     .notice.error { background:#fff0f0; border:1px solid #ffd0d0; color:#8c1d2b; }
     .notice.success { background:#eefaf2; border:1px solid #c7ead2; color:#17652b; }
@@ -113,8 +126,8 @@ include 'includes/header.php';
     <section class="verify-booking-card">
         <img src="globalife.png" alt="Globalife" class="verify-booking-logo">
         <h2>Confirm your appointment</h2>
-        <p>Enter the code sent to your registered email. Your appointment will only be saved after successful verification.</p>
-        <div class="email-chip"><?php echo htmlspecialchars($maskedEmail); ?></div>
+        <p>Enter the code sent to your registered <?php echo htmlspecialchars($verificationLabel); ?>. Your appointment will only be saved after successful verification.</p>
+        <div class="destination-chip"><?php echo htmlspecialchars($verificationDestination); ?></div>
 
         <?php if ($error): ?>
             <div class="notice error"><?php echo htmlspecialchars($error); ?></div>
@@ -141,7 +154,12 @@ include 'includes/header.php';
             <button type="submit" class="primary-btn">Verify and Submit Appointment</button>
         </form>
 
-        <p class="expiry-note">The code expires after 10 minutes. Check your spam folder if it is not in your inbox.</p>
+        <p class="expiry-note">
+            The code expires after 10 minutes.
+            <?php echo $verificationChannel === 'email'
+                ? 'Check your spam folder if it is not in your inbox.'
+                : 'Check that your mobile number has signal and can receive text messages.'; ?>
+        </p>
 
         <div class="secondary-actions">
             <form method="POST" action="verify_appointment.php">
@@ -156,4 +174,3 @@ include 'includes/header.php';
     </section>
 </main>
 <?php include 'includes/footer.php'; ?>
-

@@ -312,6 +312,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     if ($action === 'confirm_booking') {
+        $verificationChannel = strtolower(trim((string) ($_POST['verification_channel'] ?? 'email')));
+        if (!in_array($verificationChannel, ['email', 'sms'], true)) {
+            $verificationChannel = 'email';
+        }
         $hasBookingSelection = $bk['type'] === 'consultation'
             ? !empty($bk['doctor_id'])
             : !empty($bk['service_ids']);
@@ -335,7 +339,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'price_channel' => $bk['price_channel'],
                     'appointment_date' => $bk['appointment_date'],
                     'appointment_time' => $bk['appointment_time'],
-                ]
+                ],
+                $verificationChannel
             );
 
             if (!$verification['ok']) {
@@ -657,8 +662,17 @@ $additionalStyles = '
     .clinic-reminder span { color: #4a6072; font-size: .9rem; line-height: 1.45; }
     .review-check { display: flex; align-items: flex-start; gap: 10px; background: #f8fbff; border: 1px solid #dce9f4; border-radius: 10px; padding: 13px 14px; margin-bottom: 14px; color: #26495f; font-weight: 600; }
     .review-check input { margin-top: 3px; width: 18px; height: 18px; accent-color: #0077b6; }
+    .verification-methods { margin:18px 0; padding:16px; border:1px solid #d8e8f2; border-radius:12px; background:#f8fcfe; }
+    .verification-methods > strong { display:block; color:#073b4c; margin-bottom:5px; }
+    .verification-methods > p { margin:0 0 12px; color:#607784; font-size:.88rem; line-height:1.45; }
+    .verification-method-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
+    .verification-method { display:flex; align-items:center; gap:10px; min-width:0; padding:12px 14px; border:2px solid #d8e8f0; border-radius:10px; background:#fff; cursor:pointer; }
+    .verification-method:has(input:checked) { border-color:#0c83c3; background:#eaf7fd; box-shadow:0 0 0 3px rgba(12,131,195,.1); }
+    .verification-method input { width:18px; height:18px; margin:0; accent-color:#0c83c3; }
+    .verification-method span { min-width:0; color:#466171; font-size:.84rem; line-height:1.35; }
+    .verification-method strong { display:block; color:#073b4c; font-size:.92rem; }
     @media (max-width: 820px) { .clinic-reminder-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-    @media (max-width: 520px) { .clinic-reminder-grid { grid-template-columns: 1fr; } }
+    @media (max-width: 520px) { .clinic-reminder-grid, .verification-method-grid { grid-template-columns: 1fr; } }
     .detail-block { background: #f8fafc; border-radius: 12px; padding: 16px; margin-bottom: 14px; }
     .detail-block h4 { margin: 0 0 8px; color: #0077b6; font-size: 1rem; }
     .detail-block p { margin: 0; color: #444; line-height: 1.5; }
@@ -707,7 +721,7 @@ $stepLabels = [
                 <strong>Appointment request successfully submitted.</strong><br>
                 Reference #<?php echo $bookedId; ?>.
                 <?php if ($appointmentEmailWarning === ''): ?>
-                    We sent the booking details to your verified email.
+                    We sent the booking details to your registered email and mobile number.
                 <?php else: ?>
                     Your booking is saved and visible in My Appointments.
                 <?php endif; ?>
@@ -839,8 +853,8 @@ $stepLabels = [
             </div>
             <div class="clinic-reminder">
                 <span class="clinic-reminder-number" aria-hidden="true">3</span>
-                <strong>Verify your email</strong>
-                <span>Enter the 6-digit code sent to your email, then wait for clinic confirmation.</span>
+                <strong>Verify your request</strong>
+                <span>Choose email or SMS, then enter the 6-digit confirmation code.</span>
             </div>
             <div class="clinic-reminder">
                 <span class="clinic-reminder-number" aria-hidden="true">4</span>
@@ -1541,9 +1555,23 @@ $stepLabels = [
             <?php endif; ?>
             <form method="post" action="book_appointment.php" style="margin-top:24px;">
                 <input type="hidden" name="booking_action" value="confirm_booking">
+                <div class="verification-methods">
+                    <strong>Where should we send the confirmation code?</strong>
+                    <p>Choose one method before submitting your appointment request.</p>
+                    <div class="verification-method-grid">
+                        <label class="verification-method">
+                            <input type="radio" name="verification_channel" value="email" checked>
+                            <span><strong>Email</strong>Send the code to your registered email.</span>
+                        </label>
+                        <label class="verification-method">
+                            <input type="radio" name="verification_channel" value="sms">
+                            <span><strong>SMS</strong>Text the code to your registered mobile number.</span>
+                        </label>
+                    </div>
+                </div>
                 <label class="review-check">
                     <input type="checkbox" required>
-                    <span>I reviewed the details and understand that I must verify the code sent to my email before this request is submitted.</span>
+                    <span>I reviewed the details and understand that I must verify the code before this request is submitted.</span>
                 </label>
                 <button type="submit" class="btn-primary">Send confirmation code</button>
             </form>

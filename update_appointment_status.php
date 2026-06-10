@@ -72,8 +72,18 @@ if ($updateStmt->execute()) {
     $_SESSION['success'] = 'Appointment status updated successfully.';
     if ($new_status === 'confirmed' && $appointment['status'] !== 'confirmed') {
         $emailResult = appointment_send_clinic_confirmation_email($conn, (int) $appointment_id);
+        $smsResult = appointment_send_clinic_confirmation_sms($conn, (int) $appointment_id);
+        $failedChannels = [];
         if (!$emailResult['ok']) {
-            $_SESSION['success'] .= ' The status was saved, but the confirmation email could not be delivered.';
+            $failedChannels[] = 'email';
+        }
+        if (!$smsResult['ok']) {
+            $failedChannels[] = 'SMS';
+        }
+        if ($failedChannels) {
+            $_SESSION['success'] .= ' The status was saved, but the '
+                . implode(' and ', $failedChannels)
+                . ' confirmation could not be delivered.';
         }
     }
 } else {
@@ -85,7 +95,6 @@ $conn->close();
 
 header('Location: view_appointments.php');
 exit();
-
 
 
 

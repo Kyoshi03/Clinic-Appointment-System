@@ -34,6 +34,18 @@ if (clinic_mail_ready()) {
 }
 deploy_check_add($checks, 'SMTP email notifications', $mailOk, $mailDetail);
 
+require_once __DIR__ . '/includes/sms.php';
+$smsConfig = clinic_sms_config();
+$smsCheck = clinic_sms_auth_check();
+deploy_check_add(
+    $checks,
+    'SMS notifications',
+    $smsCheck['ok'],
+    $smsCheck['ok']
+        ? 'SkySMS API login verified at ' . $smsConfig['base_url']
+        : (string) ($smsCheck['error'] ?? 'Configure config/sms.php or the SKYSMS_API_KEY environment variable')
+);
+
 $dbDetail = 'Not checked';
 $dbOk = false;
 try {

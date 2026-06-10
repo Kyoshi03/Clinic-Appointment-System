@@ -6,6 +6,7 @@ header('Expires: 0');
 require_once 'includes/session.php';
 require_once 'config/database.php';
 require_once 'includes/mailer.php';
+require_once 'includes/sms.php';
 
 $registrationSource = trim((string) ($_POST['registration_source'] ?? $_GET['source'] ?? ''));
 if ($registrationSource !== 'walkin_qr') {
@@ -42,6 +43,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $civil_status = trim($_POST['civil_status'] ?? '');
     $phone = trim($_POST['phone'] ?? '');
     $email = trim($_POST['email'] ?? '');
+    $verification_channel = strtolower(trim($_POST['verification_channel'] ?? 'email'));
     $barangay = trim($_POST['barangay'] ?? '');
     $city = trim($_POST['city'] ?? '');
     $address = trim($_POST['address'] ?? '');
@@ -107,6 +109,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $passwordPopupMessage = 'Password and confirm password do not match. Please type them again.';
     } elseif (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
         $error = 'Please enter a valid email address.';
+    } elseif (!in_array($verification_channel, ['email', 'sms'], true)) {
+        $error = 'Please choose where you want to receive the verification code.';
+    } elseif ($verification_channel === 'sms' && clinic_sms_normalize_phone($phone) === null) {
+        $error = 'Enter a valid Philippine mobile number, such as 09171234567, for SMS verification.';
     } else {
         // Validate password requirements
         $passwordErrors = validatePassword($password);
@@ -173,6 +179,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         'emergency_contact_relationship' => $emergency_contact_relationship,
                         'emergency_contact_number' => $emergency_contact_number,
                         'registration_source' => $registrationSource,
+                        'verification_channel' => $verification_channel,
                     ],
                     'code_hash' => password_hash($verificationCode, PASSWORD_DEFAULT),
                     'expires_at' => time() + 10 * 60,
@@ -180,8 +187,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'attempts' => 0,
                 ];
 
-                $sent = clinic_send_otp_email(
+                $sent = clinic_send_verification_code(
+                    $verification_channel,
                     strtolower($email),
+                    $phone,
                     $full_name,
                     $verificationCode,
                     'registration'
@@ -757,6 +766,62 @@ $additionalStyles = '
         line-height: 1.4;
         font-weight: 500;
     }
+    .verification-choice {
+        margin-top: 16px;
+        padding: 16px;
+        border: 1px solid #cfe5ef;
+        border-radius: 12px;
+        background: #f8fcfe;
+    }
+    .verification-choice > strong {
+        display: block;
+        color: #073b4c;
+        margin-bottom: 5px;
+    }
+    .verification-choice > p {
+        margin: 0 0 12px;
+        color: #607784;
+        font-size: .86rem;
+        line-height: 1.45;
+    }
+    .verification-options {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+    }
+    .verification-option {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        min-width: 0;
+        padding: 12px 14px;
+        border: 2px solid #d8e8f0;
+        border-radius: 10px;
+        background: #fff;
+        cursor: pointer;
+    }
+    .verification-option:has(input:checked) {
+        border-color: #0c83c3;
+        background: #eaf7fd;
+        box-shadow: 0 0 0 3px rgba(12,131,195,.1);
+    }
+    .verification-option input {
+        width: 18px;
+        height: 18px;
+        margin: 0;
+        accent-color: #0c83c3;
+    }
+    .verification-option span {
+        min-width: 0;
+        color: #385668;
+        font-size: .84rem;
+        line-height: 1.35;
+    }
+    .verification-option strong {
+        display: block;
+        color: #073b4c;
+        font-size: .92rem;
+    }
     .dob-picker {
         position: relative;
     }
@@ -1053,6 +1118,9 @@ $additionalStyles = '
         .form-row {
             grid-template-columns: 1fr;
         }
+        .verification-options {
+            grid-template-columns: 1fr;
+        }
         .popup-actions.row {
             flex-direction: column;
         }
@@ -1217,14 +1285,46 @@ $additionalStyles = '
                         </div>
                         
                         <div class="form-group">
-                            <label for="email">Email Address (verification required)</label>
+                            <label for="email">Email Address</label>
                             <div class="input-wrapper">
                                 <svg class="input-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
                                 </svg>
                                 <input type="email" id="email" name="email" placeholder="you@example.com" required value="<?php echo (!empty($success) ? '' : (isset($_POST['email']) ? htmlspecialchars($_POST['email']) : '')); ?>">
                             </div>
-                            <span class="field-hint">We will send a 6-digit code to confirm that this email belongs to you.</span>
+                            <span class="field-hint">Used for clinic notices, appointment details, and password recovery.</span>
+                        </div>
+                    </div>
+
+                    <?php $selectedVerificationChannel = strtolower((string) ($_POST['verification_channel'] ?? 'email')); ?>
+                    <div class="verification-choice">
+                        <strong>Where should we send your verification code?</strong>
+                        <p>Choose one. The code must be verified before your account is created.</p>
+                        <div class="verification-options">
+                            <label class="verification-option">
+                                <input
+                                    type="radio"
+                                    name="verification_channel"
+                                    value="email"
+                                    <?php echo $selectedVerificationChannel !== 'sms' ? 'checked' : ''; ?>
+                                >
+                                <span>
+                                    <strong>Email</strong>
+                                    Send the code to the email address above.
+                                </span>
+                            </label>
+                            <label class="verification-option">
+                                <input
+                                    type="radio"
+                                    name="verification_channel"
+                                    value="sms"
+                                    <?php echo $selectedVerificationChannel === 'sms' ? 'checked' : ''; ?>
+                                >
+                                <span>
+                                    <strong>SMS</strong>
+                                    Text the code to the mobile number above.
+                                </span>
+                            </label>
                         </div>
                     </div>
                     

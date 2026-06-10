@@ -233,10 +233,13 @@ $additionalStyles = patientAvatarStyles() . '
     }
     .appointment-tools {
         display: grid;
-        grid-template-columns: 180px 180px auto;
+        grid-template-columns: minmax(240px, 1fr) 180px 180px auto;
         gap: 12px;
         align-items: end;
         margin-bottom: 18px;
+    }
+    .appointment-tools.patient-filters {
+        grid-template-columns: 180px 180px auto;
     }
     .tool-field label {
         display: block;
@@ -643,7 +646,13 @@ include 'includes/header.php';
                 <?php endif; ?>
             </div>
         <?php else: ?>
-            <div class="appointment-tools" aria-label="Appointment filters">
+            <div class="appointment-tools<?php echo $userRole === 'patient' ? ' patient-filters' : ''; ?>" aria-label="Appointment filters">
+                <?php if ($userRole !== 'patient'): ?>
+                    <div class="tool-field">
+                        <label for="appointmentSearch">Search appointments</label>
+                        <input type="search" id="appointmentSearch" placeholder="Search patient, doctor, reference, notes, or date">
+                    </div>
+                <?php endif; ?>
                 <div class="tool-field">
                     <label for="appointmentStatusFilter">Status</label>
                     <select id="appointmentStatusFilter">
@@ -808,7 +817,7 @@ include 'includes/header.php';
             </div>
             <div class="filter-empty" id="appointmentFilterEmpty">
                 <strong>No appointments match your filters.</strong>
-                <span>Try another status or date.</span>
+                <span>Try another search, status, or date.</span>
             </div>
         <?php endif; ?>
     </div>
@@ -862,6 +871,7 @@ include 'includes/header.php';
     var confirmText = document.getElementById('statusConfirmText');
     var confirmYes = document.getElementById('statusConfirmYes');
     var pendingForm = null;
+    var searchInput = document.getElementById('appointmentSearch');
     var statusFilter = document.getElementById('appointmentStatusFilter');
     var dateFilter = document.getElementById('appointmentDateFilter');
     var resetFilter = document.getElementById('appointmentFilterReset');
@@ -925,15 +935,18 @@ include 'includes/header.php';
     }
 
     function applyAppointmentFilters() {
+        var q = searchInput ? searchInput.value.trim().toLowerCase() : '';
         var status = statusFilter ? statusFilter.value : '';
         var date = dateFilter ? dateFilter.value : '';
         var visible = 0;
 
         rows.forEach(function(row) {
+            var rowSearch = (row.getAttribute('data-search') || '').toLowerCase();
             var rowStatus = row.getAttribute('data-status') || '';
             var rowDate = row.getAttribute('data-date') || '';
             var show = true;
 
+            if (q && rowSearch.indexOf(q) === -1) show = false;
             if (status && rowStatus !== status) show = false;
             if (date && rowDate !== date) show = false;
 
@@ -949,12 +962,13 @@ include 'includes/header.php';
         }
     }
 
-    [statusFilter, dateFilter].forEach(function(control) {
+    [searchInput, statusFilter, dateFilter].forEach(function(control) {
         if (control) control.addEventListener('input', applyAppointmentFilters);
         if (control && control.tagName === 'SELECT') control.addEventListener('change', applyAppointmentFilters);
     });
     if (resetFilter) {
         resetFilter.addEventListener('click', function() {
+            if (searchInput) searchInput.value = '';
             if (statusFilter) statusFilter.value = '';
             if (dateFilter) dateFilter.value = '';
             applyAppointmentFilters();

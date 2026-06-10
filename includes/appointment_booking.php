@@ -1,6 +1,7 @@
 <?php
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/mailer.php';
+require_once __DIR__ . '/sms.php';
 require_once __DIR__ . '/doctor_schedule.php';
 require_once __DIR__ . '/lab_services_seed_data.php';
 
@@ -198,7 +199,13 @@ function appointment_validate_payload(mysqli $conn, int $patientId, array $paylo
     ];
 }
 
-function appointment_issue_verification(mysqli $conn, int $patientId, array $payload): array {
+function appointment_issue_verification(
+    mysqli $conn,
+    int $patientId,
+    array $payload,
+    string $verificationChannel = 'email'
+): array {
+    $verificationChannel = $verificationChannel === 'sms' ? 'sms' : 'email';
     $validated = appointment_validate_payload($conn, $patientId, $payload);
     if (!$validated['ok']) {
         return $validated;
@@ -208,10 +215,10 @@ function appointment_issue_verification(mysqli $conn, int $patientId, array $pay
     $recent = $conn->prepare(
         'SELECT id, booking_payload FROM appointment_booking_verifications
          WHERE patient_id = ? AND last_sent_at >= DATE_SUB(NOW(), INTERVAL 60 SECOND)
-           AND used_at IS NULL
+           AND used_at IS NULL AND verification_channel = ?
          ORDER BY id DESC LIMIT 1'
     );
-    $recent->bind_param('i', $patientId);
+    $recent->bind_param('is', $patientId, $verificationChannel);
     $recent->execute();
     $recentRow = $recent->get_result()->fetch_assoc();
     $recent->close();
@@ -220,6 +227,8 @@ function appointment_issue_verification(mysqli $conn, int $patientId, array $pay
             'ok' => true,
             'verification_id' => (int) $recentRow['id'],
             'email' => (string) $validated['patient']['email'],
+            'phone' => (string) $validated['patient']['phone'],
+            'verification_channel' => $verificationChannel,
             'already_sent' => true,
         ];
     }
@@ -236,13 +245,17 @@ function appointment_issue_verification(mysqli $conn, int $patientId, array $pay
     $code = (string) random_int(100000, 999999);
     $hash = password_hash($code, PASSWORD_DEFAULT);
     $email = (string) $validated['patient']['email'];
+    $phone = (string) $validated['patient']['phone'];
+    if ($verificationChannel === 'sms' && clinic_sms_normalize_phone($phone) === null) {
+        return ['ok' => false, 'error' => 'Add a valid Philippine mobile number to your profile before choosing SMS verification.'];
+    }
 
     $insert = $conn->prepare(
         'INSERT INTO appointment_booking_verifications
-            (patient_id, email, code_hash, booking_payload, expires_at, last_sent_at)
-         VALUES (?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL 10 MINUTE), NOW())'
+            (patient_id, email, phone, verification_channel, code_hash, booking_payload, expires_at, last_sent_at)
+         VALUES (?, ?, ?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL 10 MINUTE), NOW())'
     );
-    $insert->bind_param('isss', $patientId, $email, $hash, $json);
+    $insert->bind_param('isssss', $patientId, $email, $phone, $verificationChannel, $hash, $json);
     $created = $insert->execute();
     $verificationId = (int) $conn->insert_id;
     $insert->close();
@@ -250,8 +263,10 @@ function appointment_issue_verification(mysqli $conn, int $patientId, array $pay
         return ['ok' => false, 'error' => 'We could not prepare the appointment verification. Please try again.'];
     }
 
-    $sent = clinic_send_otp_email(
+    $sent = clinic_send_verification_code(
+        $verificationChannel,
         $email,
+        $phone,
         (string) $validated['patient']['full_name'],
         $code,
         'appointment'
@@ -268,13 +283,15 @@ function appointment_issue_verification(mysqli $conn, int $patientId, array $pay
         'ok' => true,
         'verification_id' => $verificationId,
         'email' => $email,
+        'phone' => $phone,
+        'verification_channel' => $verificationChannel,
         'already_sent' => false,
     ];
 }
 
 function appointment_get_verification(mysqli $conn, int $patientId, int $verificationId): ?array {
     $stmt = $conn->prepare(
-        'SELECT id, patient_id, email, code_hash, booking_payload, expires_at,
+        'SELECT id, patient_id, email, phone, verification_channel, code_hash, booking_payload, expires_at,
                 attempts, last_sent_at, used_at
          FROM appointment_booking_verifications
          WHERE id = ? AND patient_id = ?
@@ -326,8 +343,11 @@ function appointment_resend_verification(mysqli $conn, int $patientId, int $veri
         return ['ok' => false, 'error' => 'We could not create a new verification code. Please try again.'];
     }
 
-    $sent = clinic_send_otp_email(
+    $verificationChannel = ($row['verification_channel'] ?? 'email') === 'sms' ? 'sms' : 'email';
+    $sent = clinic_send_verification_code(
+        $verificationChannel,
         (string) $validated['patient']['email'],
+        (string) $validated['patient']['phone'],
         (string) $validated['patient']['full_name'],
         $code,
         'appointment'
@@ -385,7 +405,7 @@ function appointment_send_booking_email(array $details): array {
 
     $content = appointment_email_layout(
         'Appointment request received',
-        'Hello ' . (string) $details['patient_name'] . '. Your email was verified and your appointment request was submitted successfully.',
+        'Hello ' . (string) $details['patient_name'] . '. Your verification code was accepted and your appointment request was submitted successfully.',
         $rows,
         'The clinic will review your request. Payment is made at the clinic. You will receive a reminder before the appointment after the clinic confirms it.'
     );
@@ -397,6 +417,16 @@ function appointment_send_booking_email(array $details): array {
         $content['html'],
         $content['text']
     );
+}
+
+function appointment_send_booking_sms(array $details): array {
+    $dateLabel = date('M j, Y', strtotime((string) $details['appointment_date']));
+    $timeLabel = date('g:i A', strtotime((string) $details['appointment_time']));
+    $message = 'Globalife: Appointment request #' . (int) $details['appointment_id']
+        . ' received for ' . $dateLabel . ' at ' . $timeLabel
+        . '. Please wait for clinic confirmation.';
+
+    return clinic_send_sms_message((string) ($details['phone'] ?? ''), $message);
 }
 
 function appointment_send_reminder_email(array $details): array {
@@ -428,10 +458,20 @@ function appointment_send_reminder_email(array $details): array {
     );
 }
 
-function appointment_fetch_email_details(mysqli $conn, int $appointmentId): ?array {
+function appointment_send_reminder_sms(array $details): array {
+    $dateLabel = date('M j, Y', strtotime((string) $details['appointment_date']));
+    $timeLabel = date('g:i A', strtotime((string) $details['appointment_time']));
+    $message = 'Globalife reminder: Appointment #' . (int) $details['appointment_id']
+        . ' is on ' . $dateLabel . ' at ' . $timeLabel
+        . '. Please arrive 10-15 minutes early.';
+
+    return clinic_send_sms_message((string) ($details['phone'] ?? ''), $message);
+}
+
+function appointment_fetch_notification_details(mysqli $conn, int $appointmentId): ?array {
     $stmt = $conn->prepare(
         "SELECT a.id AS appointment_id, a.appointment_date, a.appointment_time,
-                p.full_name AS patient_name, p.email,
+                p.full_name AS patient_name, p.email, p.phone,
                 d.full_name AS doctor_name,
                 COALESCE(
                     GROUP_CONCAT(DISTINCT ls.name ORDER BY ls.name SEPARATOR ', '),
@@ -444,7 +484,7 @@ function appointment_fetch_email_details(mysqli $conn, int $appointmentId): ?arr
          LEFT JOIN lab_services ls ON ls.id = aps.service_id
          WHERE a.id = ?
          GROUP BY a.id, a.appointment_date, a.appointment_time,
-                  p.full_name, p.email, d.full_name
+                  p.full_name, p.email, p.phone, d.full_name
          LIMIT 1"
     );
     $stmt->bind_param('i', $appointmentId);
@@ -455,7 +495,7 @@ function appointment_fetch_email_details(mysqli $conn, int $appointmentId): ?arr
 }
 
 function appointment_send_clinic_confirmation_email(mysqli $conn, int $appointmentId): array {
-    $details = appointment_fetch_email_details($conn, $appointmentId);
+    $details = appointment_fetch_notification_details($conn, $appointmentId);
     if (!$details || !filter_var((string) ($details['email'] ?? ''), FILTER_VALIDATE_EMAIL)) {
         return ['ok' => false, 'error' => 'The patient does not have a valid email address.'];
     }
@@ -477,7 +517,7 @@ function appointment_send_clinic_confirmation_email(mysqli $conn, int $appointme
         'Your appointment is confirmed',
         'Hello ' . (string) $details['patient_name'] . '. The clinic has confirmed your Globalife appointment.',
         $rows,
-        'Please arrive 10-15 minutes early. We will also email you a reminder before your appointment.'
+        'Please arrive 10-15 minutes early. We will also send email and SMS reminders before your appointment.'
     );
 
     return clinic_send_email(
@@ -487,6 +527,21 @@ function appointment_send_clinic_confirmation_email(mysqli $conn, int $appointme
         $content['html'],
         $content['text']
     );
+}
+
+function appointment_send_clinic_confirmation_sms(mysqli $conn, int $appointmentId): array {
+    $details = appointment_fetch_notification_details($conn, $appointmentId);
+    if (!$details) {
+        return ['ok' => false, 'error' => 'The appointment notification details could not be found.'];
+    }
+
+    $dateLabel = date('M j, Y', strtotime((string) $details['appointment_date']));
+    $timeLabel = date('g:i A', strtotime((string) $details['appointment_time']));
+    $message = 'Globalife: Appointment #' . (int) $details['appointment_id']
+        . ' is confirmed for ' . $dateLabel . ' at ' . $timeLabel
+        . '. Please arrive 10-15 minutes early.';
+
+    return clinic_send_sms_message((string) ($details['phone'] ?? ''), $message);
 }
 
 function appointment_verify_and_create(mysqli $conn, int $patientId, int $verificationId, string $code): array {
@@ -650,15 +705,19 @@ function appointment_verify_and_create(mysqli $conn, int $patientId, int $verifi
         'total' => $validated['total'],
         'patient_name' => (string) $validated['patient']['full_name'],
         'email' => (string) $validated['patient']['email'],
+        'phone' => (string) ($validated['patient']['phone'] ?? ''),
         'doctor_name' => (string) $validated['doctor_name'],
         'booking_type' => (string) $booking['type'],
     ];
     $emailResult = appointment_send_booking_email($details);
+    $smsResult = appointment_send_booking_sms($details);
 
     return [
         'ok' => true,
         'appointment_id' => $appointmentId,
         'email_sent' => (bool) $emailResult['ok'],
         'email_error' => $emailResult['ok'] ? '' : (string) ($emailResult['error'] ?? ''),
+        'sms_sent' => (bool) $smsResult['ok'],
+        'sms_error' => $smsResult['ok'] ? '' : (string) ($smsResult['error'] ?? ''),
     ];
 }

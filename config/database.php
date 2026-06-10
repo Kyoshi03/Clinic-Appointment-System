@@ -434,6 +434,8 @@ function initNurseClinicalSchema(mysqli $conn): void {
         id INT AUTO_INCREMENT PRIMARY KEY,
         patient_id INT NOT NULL,
         email VARCHAR(100) NOT NULL,
+        phone VARCHAR(20) DEFAULT NULL,
+        verification_channel ENUM('email','sms') NOT NULL DEFAULT 'email',
         code_hash VARCHAR(255) NOT NULL,
         booking_payload LONGTEXT NOT NULL,
         expires_at DATETIME NOT NULL,
@@ -445,12 +447,23 @@ function initNurseClinicalSchema(mysqli $conn): void {
         INDEX idx_booking_verify_patient (patient_id),
         INDEX idx_booking_verify_active (patient_id, used_at)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+    if (!dbColumnExists($conn, 'appointment_booking_verifications', 'phone')) {
+        $conn->query("ALTER TABLE appointment_booking_verifications ADD COLUMN phone VARCHAR(20) DEFAULT NULL AFTER email");
+    }
+    if (!dbColumnExists($conn, 'appointment_booking_verifications', 'verification_channel')) {
+        $conn->query(
+            "ALTER TABLE appointment_booking_verifications
+             ADD COLUMN verification_channel ENUM('email','sms') NOT NULL DEFAULT 'email' AFTER phone"
+        );
+    }
 
     $conn->query("CREATE TABLE IF NOT EXISTS appointment_email_reminders (
         id INT AUTO_INCREMENT PRIMARY KEY,
         appointment_id INT NOT NULL,
         reminder_type VARCHAR(30) NOT NULL DEFAULT '24_hours',
         scheduled_for DATETIME NOT NULL,
+        email_sent_at DATETIME DEFAULT NULL,
+        sms_sent_at DATETIME DEFAULT NULL,
         sent_at DATETIME DEFAULT NULL,
         attempts TINYINT UNSIGNED NOT NULL DEFAULT 0,
         last_error VARCHAR(500) DEFAULT NULL,
@@ -459,6 +472,12 @@ function initNurseClinicalSchema(mysqli $conn): void {
         UNIQUE KEY uq_appointment_reminder (appointment_id, reminder_type),
         INDEX idx_reminders_due (sent_at, scheduled_for)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+    if (!dbColumnExists($conn, 'appointment_email_reminders', 'email_sent_at')) {
+        $conn->query("ALTER TABLE appointment_email_reminders ADD COLUMN email_sent_at DATETIME DEFAULT NULL AFTER scheduled_for");
+    }
+    if (!dbColumnExists($conn, 'appointment_email_reminders', 'sms_sent_at')) {
+        $conn->query("ALTER TABLE appointment_email_reminders ADD COLUMN sms_sent_at DATETIME DEFAULT NULL AFTER email_sent_at");
+    }
 }
 
 function seedDefaultLabServices($conn) {
