@@ -546,6 +546,7 @@ $additionalStyles = '
     .price-cols { display: flex; gap: 12px; flex-shrink: 0; font-size: 0.85rem; color: #555; }
     .price-cols span { min-width: 72px; text-align: right; }
     .price-tag { color: #0077b6; font-weight: 700; white-space: nowrap; }
+    .consultation-fee-note { white-space: normal; overflow-wrap: anywhere; }
     .form-group { margin-bottom: 18px; }
     .form-group label { display: block; margin-bottom: 6px; font-weight: 600; color: #333; }
     .form-group input, .form-group select { width: 100%; padding: 12px; border: 2px solid #e0e0e0; border-radius: 10px; font-size: 1rem; box-sizing: border-box; }
@@ -1116,7 +1117,7 @@ $stepLabels = [
                     <h4><?php echo htmlspecialchars((string) $selectedDoctor['full_name']); ?></h4>
                     <p><strong>Specialty:</strong> <?php echo htmlspecialchars((string) ($selectedDoctor['specialty'] ?: 'General consultation')); ?></p>
                     <p><strong>Clinic hours:</strong><br><?php echo nl2br(htmlspecialchars((string) $selectedDoctor['clinic_hours'])); ?></p>
-                    <p class="price-tag">Consultation fee will be confirmed and paid at the clinic.</p>
+                    <p class="price-tag consultation-fee-note">Consultation fee will be confirmed and paid at the clinic.</p>
                 </div>
             <?php else: ?>
                 <?php foreach ($selectedServices as $svc): ?>
