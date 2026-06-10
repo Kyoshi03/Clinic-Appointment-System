@@ -504,6 +504,8 @@ if ($doctorSlotResult) {
             'id' => (int) $slot['id'],
             'doctor' => (string) $slot['full_name'],
             'specialty' => (string) ($slot['specialty'] ?? ''),
+            'start' => substr((string) $slot['time_start'], 0, 5),
+            'end' => substr((string) $slot['time_end'], 0, 5),
             'time' => doctor_format_time_hm((string) $slot['time_start']) . ' - ' . doctor_format_time_hm((string) $slot['time_end']),
         ];
     }
@@ -551,17 +553,51 @@ $additionalStyles = '
     @media (max-width: 600px) { .form-row { grid-template-columns: 1fr; } }
     .schedule-card { border: 1px solid #d8e8f2; border-radius: 18px; background: #f8fcff; padding: 18px; margin-bottom: 16px; box-shadow: 0 10px 24px rgba(20,79,123,.06); }
     .schedule-layout { display: grid; grid-template-columns: minmax(280px, 1.15fr) minmax(240px, .85fr); gap: 18px; align-items: start; }
-    .schedule-controls { display: grid; gap: 12px; }
-    .schedule-controls .form-row { margin: 0; }
+    .schedule-controls { display: grid; gap: 14px; }
     .schedule-note { margin: 0; color: #4f6776; line-height: 1.5; font-size: .95rem; }
     .booking-calendar-panel { border: 1px solid #d8e8f2; border-radius: 18px; background: #fff; padding: 18px; margin: 0 0 18px; box-shadow: 0 10px 24px rgba(20,79,123,.06); }
     .booking-calendar-panel .schedule-layout { grid-template-columns: 1fr; }
     .calendar-actions { display: flex; justify-content: flex-end; align-items: center; gap: 14px; margin-top: 14px; }
     .calendar-actions .btn-primary { width: auto; min-width: 230px; margin-top: 0; padding: 13px 28px; }
     .calendar-actions .btn-primary:disabled { opacity: .48; cursor: not-allowed; background: #b8cad8; box-shadow: none; }
-    .selected-date-card { display: grid; gap: 6px; padding: 14px; border: 1px solid #cfe3f0; border-radius: 14px; background: #fff; }
+    .selected-date-card { display: grid; gap: 6px; padding: 16px; border: 1px solid #cfe3f0; border-radius: 14px; background: #fff; }
     .selected-date-card span { color: #60727d; font-size: .78rem; font-weight: 800; text-transform: uppercase; }
     .selected-date-card strong { color: #073b4c; font-size: 1.15rem; }
+    .selected-date-card.is-invalid { border-color:#c9303e; box-shadow:0 0 0 3px rgba(201,48,62,.1); }
+    .time-picker-field { display:grid; gap:7px; }
+    .time-picker-field > label { color:#263f4d; font-size:.92rem; font-weight:800; }
+    .time-picker-trigger { width:100%; min-height:58px; display:flex; align-items:center; justify-content:space-between; gap:14px; padding:11px 14px; border:1px solid #bcd8e8; border-radius:12px; background:#fff; color:#073b4c; font:inherit; text-align:left; cursor:pointer; box-shadow:0 5px 14px rgba(20,79,123,.05); }
+    .time-picker-trigger:hover { border-color:#69add0; background:#fbfeff; }
+    .time-picker-trigger:focus-visible { outline:3px solid rgba(15,124,194,.18); border-color:#0f7cc2; }
+    .time-picker-trigger.is-invalid { border-color:#c9303e; box-shadow:0 0 0 3px rgba(201,48,62,.12); }
+    .time-picker-copy { display:grid; gap:2px; min-width:0; }
+    .time-picker-copy strong { color:#073b4c; font-size:1.02rem; }
+    .time-picker-copy small { color:#607786; font-size:.78rem; line-height:1.35; }
+    .time-picker-clock { display:grid; place-items:center; flex:0 0 auto; width:34px; height:34px; border-radius:50%; background:#e8f5fc; color:#0878b5; font-size:1.05rem; font-weight:900; }
+    .time-picker-trigger:disabled { cursor:not-allowed; background:#f2f5f7; border-color:#d9e1e6; color:#87959e; box-shadow:none; }
+    .time-picker-trigger:disabled .time-picker-clock { background:#e4e9ec; color:#87959e; }
+    .time-picker-overlay { position:fixed; inset:0; z-index:5200; display:grid; place-items:center; padding:18px; background:rgba(4,35,52,.58); }
+    .time-picker-overlay[hidden] { display:none; }
+    .time-picker-dialog { width:min(430px, calc(100vw - 32px)); border:1px solid #c9dfea; border-radius:16px; background:#fff; box-shadow:0 26px 70px rgba(4,35,52,.28); overflow:hidden; }
+    .time-picker-head { display:flex; align-items:flex-start; justify-content:space-between; gap:14px; padding:20px 20px 14px; border-bottom:1px solid #e0ebf1; }
+    .time-picker-head h3 { margin:0 0 5px; color:#073b4c; font-size:1.2rem; }
+    .time-picker-head p { margin:0; color:#607786; font-size:.84rem; line-height:1.45; }
+    .time-picker-close { display:grid; place-items:center; flex:0 0 36px; width:36px; height:36px; padding:0; border:0; border-radius:8px; background:#edf6fc; color:#075f91; font:inherit; font-size:1.35rem; cursor:pointer; }
+    .time-entry { display:grid; grid-template-columns:minmax(0, 1fr) 18px minmax(0, 1fr) 78px; align-items:start; gap:10px; padding:22px 20px 16px; }
+    .time-entry-part { display:grid; gap:7px; }
+    .time-entry-part input, .time-entry-part select { width:100%; height:76px; box-sizing:border-box; border:2px solid #bcd8e8; border-radius:10px; background:#fff; color:#073b4c; font:inherit; font-size:2rem; font-weight:700; text-align:center; }
+    .time-entry-part select { padding:0 8px; }
+    .time-entry-part label { color:#607786; font-size:.78rem; font-weight:800; text-align:center; text-transform:uppercase; }
+    .time-colon { padding-top:18px; color:#073b4c; font-size:2rem; font-weight:900; text-align:center; }
+    .time-period { display:grid; overflow:hidden; border:2px solid #bcd8e8; border-radius:10px; }
+    .time-period button { height:38px; border:0; background:#fff; color:#506a79; font:inherit; font-weight:900; cursor:pointer; }
+    .time-period button + button { border-top:1px solid #cfe0e9; }
+    .time-period button.is-active { background:#dff2fb; color:#066c9f; }
+    .time-picker-error { min-height:22px; margin:0; padding:0 20px; color:#b42332; font-size:.84rem; font-weight:700; }
+    .time-picker-actions { display:flex; justify-content:flex-end; gap:10px; padding:14px 20px 20px; }
+    .time-picker-actions button { min-height:42px; padding:9px 18px; border-radius:9px; font:inherit; font-weight:800; cursor:pointer; }
+    .time-picker-cancel { border:1px solid #c8dce7; background:#fff; color:#315469; }
+    .time-picker-apply { border:0; background:#0f7cc2; color:#fff; }
     .mini-calendar { border: 1px solid #d8e8f2; border-radius: 16px; background: #fff; overflow: hidden; }
     .mini-calendar-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 14px 16px; background: #fff; color: #073b4c; border-bottom: 1px solid #d8e8f2; }
     .mini-calendar-head strong { font-size: 1.22rem; }
@@ -576,31 +612,35 @@ $additionalStyles = '
     .cal-date-number { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 50%; }
     .calendar-events { display: grid; gap: 5px; }
     .cal-day small { display: block; max-width: 100%; min-height: 20px; padding: 4px 6px; border-radius: 6px; font-weight: 800; line-height: 1.2; white-space: normal; overflow: visible; text-overflow: clip; }
-    .doctor-event { background: #f0fbff; color: #073b4c; border: 1px solid #b9e4ef; border-left: 4px solid #0ea5b7; box-shadow: 0 1px 0 rgba(14,165,183,.08); }
-    .clinic-hours-event { background:#edf7ff; color:#0b4f80; border:1px solid #c8e2f4; border-left:4px solid #2f80c2; }
+    .doctor-event { background:#e8f8f4; color:#073f38; border:1px solid #a9ddd1; border-left:4px solid #159a83; box-shadow:0 2px 5px rgba(21,154,131,.08); }
+    .clinic-hours-event { background:#eaf5ff; color:#174f73; border:1px solid #bfdcf2; border-left:4px solid #3188c8; pointer-events:none; box-shadow:0 2px 5px rgba(49,136,200,.07); }
     .clinic-hours-event span { display:block; }
-    .clinic-hours-event .clinic-hours-label { font-size:.54rem; color:#25638f; font-weight:900; text-transform:uppercase; }
-    .clinic-hours-event .clinic-hours-time { font-size:.64rem; color:#073b4c; font-weight:900; margin-top:1px; }
+    .clinic-hours-event .clinic-hours-label { font-size:.54rem; color:#31719c; font-weight:900; text-transform:uppercase; }
+    .clinic-hours-event .clinic-hours-time { font-size:.64rem; color:#123f5c; font-weight:900; margin-top:1px; }
     .clinic-closed-event { background:#f3f5f7; color:#71808a; border:1px solid #dfe5e9; border-left:4px solid #9aa8b1; }
     .clinic-hours-summary { display:flex; align-items:center; justify-content:space-between; gap:14px; margin-bottom:14px; padding:12px 14px; border:1px solid #cfe3f0; border-radius:12px; background:#f6fbff; }
     .clinic-hours-summary strong { color:#073b4c; font-size:.92rem; }
     .clinic-hours-summary span { color:#526b7a; font-size:.86rem; text-align:right; }
-    .availability-label { display:block; color:#087083; font-size:.52rem; font-weight:900; letter-spacing:.02em; text-transform:uppercase; }
-    .availability-doctor { display:block; color:#05364a; font-size:.67rem; font-weight:900; line-height:1.18; }
-    .availability-time { display:block; color:#315d72; font-size:.6rem; font-weight:800; line-height:1.18; margin-top:1px; }
-    .more-event { background: #f6fdff; color: #087083; border: 1px solid #cfeaf2; }
+    .availability-label { display:block; color:#137e6c; font-size:.52rem; font-weight:900; letter-spacing:.02em; text-transform:uppercase; }
+    .availability-doctor { display:block; color:#073f38; font-size:.67rem; font-weight:900; line-height:1.18; }
+    .availability-time { display:block; color:#356b61; font-size:.6rem; font-weight:800; line-height:1.18; margin-top:1px; }
+    .more-event { background:#f0faf7; color:#137e6c; border:1px solid #c6e8df; }
+    .cal-day.is-clinic-open { background:#fbfdff; }
+    .cal-day.has-doctor { background:#f6fcfa; box-shadow:inset 0 3px 0 #6dc7b3; }
+    .cal-day.has-doctor .cal-date-number { color:#126e60; }
     .cal-day:hover { background: #f8fcff; outline: 2px solid #8ec7e2; outline-offset: -2px; }
     .cal-day.calendar-readonly { cursor: default; }
-    .cal-day.calendar-readonly:hover { background: #fff; outline: none; }
+    .cal-day.calendar-readonly:hover { background:#fbfdff; outline:none; }
+    .cal-day.calendar-readonly.has-doctor:hover { background:#f6fcfa; }
     .cal-day.calendar-readonly.is-past:hover { background: #f7fafc; }
     .cal-day.is-today .cal-date-number { background: #eaf7ff; color: #0b65a0; }
-    .cal-day.is-selected { background: #eef8ff; outline: 3px solid #0f7cc2; outline-offset: -3px; }
+    .cal-day.is-selected { background:#eaf5ff; outline:3px solid #0f7cc2; outline-offset:-3px; box-shadow:none; }
     .cal-day.is-selected .cal-date-number { background: #0f7cc2; color: #fff; }
-    .cal-day:disabled { cursor: not-allowed; color: #a4b1b8; background: #f7fafc; }
+    .cal-day:disabled { cursor:not-allowed; color:#a4b1b8; background:#f7fafc; box-shadow:none; }
     .cal-day:disabled small { opacity: .7; }
     .cal-day.is-closed { background:#f7f8f9; }
     @media (max-width: 760px) { .booking-container { margin: 22px auto; padding: 24px 14px; } .booking-calendar-panel { padding: 12px; } .schedule-layout, .booking-calendar-panel .schedule-layout { grid-template-columns: 1fr; } .mini-calendar { overflow-x: auto; } .cal-grid { min-width: 760px; } .cal-day, .cal-empty { min-height: 132px; } .calendar-actions { align-items:stretch; flex-direction:column; position: sticky; bottom: 0; z-index: 5; padding: 10px 0 0; background: linear-gradient(180deg, rgba(255,255,255,.65), #fff 45%); } .calendar-actions .btn-primary{width:100%; min-width:0;} }
-    @media (max-width: 520px) { .cal-grid { min-width: 720px; } .cal-day, .cal-empty { min-height: 124px; } .cal-day { padding: 6px; } .cal-day small { display: block; padding: 4px 5px; } .availability-label { font-size: .5rem; } .availability-doctor { font-size: .62rem; } .availability-time { font-size: .56rem; } .clinic-hours-summary { align-items:flex-start; flex-direction:column; } .clinic-hours-summary span { text-align:left; } }
+    @media (max-width: 520px) { .cal-grid { min-width: 720px; } .cal-day, .cal-empty { min-height: 124px; } .cal-day { padding: 6px; } .cal-day small { display: block; padding: 4px 5px; } .availability-label { font-size: .5rem; } .availability-doctor { font-size: .62rem; } .availability-time { font-size: .56rem; } .clinic-hours-summary { align-items:flex-start; flex-direction:column; } .clinic-hours-summary span { text-align:left; } .time-entry { grid-template-columns:minmax(0, 1fr) 14px minmax(0, 1fr) 68px; gap:7px; padding-inline:14px; } .time-entry-part input, .time-entry-part select { height:68px; font-size:1.65rem; } .time-picker-head, .time-picker-actions { padding-left:14px; padding-right:14px; } }
     .btn-primary { width: 100%; background: linear-gradient(135deg, #0077b6, #023e8a); color: #fff; padding: 14px; border: none; border-radius: 10px; font-size: 1.05rem; font-weight: 600; cursor: pointer; margin-top: 8px; }
     .btn-secondary { display: inline-block; padding: 10px 18px; border-radius: 8px; background: #e3f2fd; color: #023e8a; text-decoration: none; font-weight: 600; margin-right: 10px; border: none; cursor: pointer; font-size: 1rem; }
     .error-message { background: #fee; color: #c1121f; padding: 14px; border-radius: 10px; margin-bottom: 18px; border-left: 4px solid #c1121f; }
@@ -726,6 +766,9 @@ $stepLabels = [
                                 }
                                 if ($dateValue === $calendarSelected) {
                                     $classes[] = 'is-selected';
+                                }
+                                if ($clinicOpen) {
+                                    $classes[] = 'is-clinic-open';
                                 }
                                 if (!empty($doctorSlots)) {
                                     $classes[] = 'has-doctor';
@@ -1102,13 +1145,15 @@ $stepLabels = [
             <div class="info-box">
                 <strong>Step 4 - Appointment schedule.</strong>
                 <?php if ($bk['type'] === 'consultation' && $selectedDoctor): ?>
-                    Choose a date and time within <?php echo htmlspecialchars((string) $selectedDoctor['full_name']); ?>'s displayed clinic hours.
+                    Choose a date with <?php echo htmlspecialchars((string) $selectedDoctor['full_name']); ?> available, then select a time.
                 <?php else: ?>
-                    Choose your preferred laboratory visit date and time.
+                    Choose an open clinic date, then select your preferred laboratory visit time.
                 <?php endif; ?>
             </div>
             <form method="post" action="book_appointment.php" id="scheduleForm">
                 <input type="hidden" name="booking_action" id="booking_action_field" value="set_schedule">
+                <input type="hidden" name="appointment_date" id="appointment_date" value="<?php echo htmlspecialchars($bk['appointment_date']); ?>">
+                <input type="hidden" name="appointment_time" id="appointment_time" value="<?php echo htmlspecialchars($bk['appointment_time']); ?>">
                 <div class="schedule-card">
                     <div class="clinic-hours-summary" aria-label="Clinic operating hours">
                         <strong>Clinic operating hours</strong>
@@ -1144,15 +1189,32 @@ $stepLabels = [
                                     if ($dateValue === $calendarSelected) {
                                         $classes[] = 'is-selected';
                                     }
-                                    if (!empty($doctorSlots)) {
+                                    if ($clinicOpen) {
+                                        $classes[] = 'is-clinic-open';
+                                    }
+                                    if ($bk['type'] === 'consultation' && !empty($doctorSlots)) {
                                         $classes[] = 'has-doctor';
                                     }
                                     if (!$clinicOpen) {
                                         $classes[] = 'is-closed';
                                     }
-                                    $disabled = $dateValue < $calendarToday || !$clinicOpen;
+                                    $disabled = $dateValue < $calendarToday
+                                        || !$clinicOpen
+                                        || ($bk['type'] === 'consultation' && empty($doctorSlots));
+                                    $timeWindows = $bk['type'] === 'consultation'
+                                        ? array_map(
+                                            static fn (array $slot): string => $slot['start'] . '-' . $slot['end'],
+                                            $doctorSlots
+                                        )
+                                        : ['08:00-17:00'];
                                     ?>
-                                    <button type="button" class="<?php echo implode(' ', $classes); ?>" data-date="<?php echo htmlspecialchars($dateValue); ?>"<?php echo $disabled ? ' disabled' : ''; ?>>
+                                    <button
+                                        type="button"
+                                        class="<?php echo implode(' ', $classes); ?>"
+                                        data-date="<?php echo htmlspecialchars($dateValue); ?>"
+                                        data-time-windows="<?php echo htmlspecialchars(implode(',', $timeWindows)); ?>"
+                                        <?php echo $disabled ? ' disabled' : ''; ?>
+                                    >
                                         <span class="cal-date-number"><?php echo $day; ?></span>
                                         <div class="calendar-events">
                                             <?php if ($clinicOpen && $dateValue >= $calendarToday): ?>
@@ -1160,6 +1222,7 @@ $stepLabels = [
                                                     <span class="clinic-hours-label">Clinic open</span>
                                                     <span class="clinic-hours-time">8:00 AM - 5:00 PM</span>
                                                 </small>
+                                                <?php if ($bk['type'] === 'consultation'): ?>
                                                 <?php foreach (array_slice($doctorSlots, 0, 2) as $slot): ?>
                                                     <?php $doctorEventText = $slot['doctor'] . ' - ' . $slot['time']; ?>
                                                     <small class="doctor-event" title="<?php echo htmlspecialchars($doctorEventText); ?>">
@@ -1171,6 +1234,7 @@ $stepLabels = [
                                                 <?php if (count($doctorSlots) > 2): ?>
                                                     <small class="more-event">+<?php echo count($doctorSlots) - 2; ?> more doctor slots</small>
                                                 <?php endif; ?>
+                                                <?php endif; ?>
                                             <?php elseif (!$clinicOpen && $dateValue >= $calendarToday): ?>
                                                 <small class="clinic-closed-event">Clinic closed</small>
                                             <?php endif; ?>
@@ -1181,31 +1245,67 @@ $stepLabels = [
                         </div>
                         <div class="schedule-controls">
                             <div class="selected-date-card">
-                                <span>Selected schedule</span>
-                                <strong id="selectedScheduleText"><?php echo $bk['appointment_date'] !== '' ? date('M d, Y', strtotime($bk['appointment_date'])) : 'Choose a date'; ?><?php echo $bk['appointment_time'] !== '' ? ' at ' . date('g:i A', strtotime($bk['appointment_time'])) : ''; ?></strong>
+                                <span>Selected date</span>
+                                <strong id="selectedDateText"><?php echo $bk['appointment_date'] !== '' ? date('M d, Y', strtotime($bk['appointment_date'])) : 'Choose a date from the calendar'; ?></strong>
                             </div>
-                            <div class="form-row">
-                                <div class="form-group">
-                                    <label for="appointment_date">Date</label>
-                                    <input type="date" name="appointment_date" id="appointment_date" required min="<?php echo date('Y-m-d'); ?>"
-                                        value="<?php echo htmlspecialchars($bk['appointment_date']); ?>">
-                                </div>
-                                <div class="form-group">
-                                    <label for="appointment_time">Time</label>
-                                    <input type="time" name="appointment_time" id="appointment_time" required min="08:00" max="17:00"
-                                        value="<?php echo htmlspecialchars($bk['appointment_time']); ?>">
-                                </div>
+                            <div class="time-picker-field">
+                                <label for="appointmentTimeButton">Preferred time</label>
+                                <button type="button" class="time-picker-trigger" id="appointmentTimeButton">
+                                    <span class="time-picker-copy">
+                                        <strong id="appointmentTimeLabel"><?php echo $bk['appointment_time'] !== '' ? date('g:i A', strtotime($bk['appointment_time'])) : 'Choose appointment time'; ?></strong>
+                                        <small id="appointmentTimeWindow">
+                                            <?php echo $bk['appointment_date'] !== ''
+                                                ? ($bk['type'] === 'consultation' ? 'Use the doctor hours shown on the selected date.' : 'Clinic hours: 8:00 AM - 5:00 PM')
+                                                : 'Choose a date first to see available hours.'; ?>
+                                        </small>
+                                    </span>
+                                    <span class="time-picker-clock" aria-hidden="true">&#9716;</span>
+                                </button>
                             </div>
                             <p class="schedule-note">
-                                <?php echo $bk['type'] === 'consultation'
-                                    ? 'The calendar only shows the selected doctor. Choose a date and enter a time inside the displayed availability window.'
-                                    : 'Choose a date from the calendar, then set your preferred visit time.'; ?>
+                                <?php if ($bk['type'] === 'consultation' && $selectedDoctor): ?>
+                                    Only dates and times within <?php echo htmlspecialchars((string) $selectedDoctor['full_name']); ?>'s availability can be selected.
+                                <?php else: ?>
+                                    Laboratory appointments are available Monday to Saturday during clinic hours.
+                                <?php endif; ?>
                             </p>
                         </div>
                     </div>
                 </div>
                 <button type="submit" class="btn-primary" id="btnScheduleNext">Next: review and confirm</button>
             </form>
+
+            <div class="time-picker-overlay" id="appointmentTimePicker" hidden>
+                <section class="time-picker-dialog" role="dialog" aria-modal="true" aria-labelledby="appointmentTimePickerTitle">
+                    <div class="time-picker-head">
+                        <div>
+                            <h3 id="appointmentTimePickerTitle">Select appointment time</h3>
+                            <p id="timePickerAvailability">Choose a date first to see available hours.</p>
+                        </div>
+                        <button type="button" class="time-picker-close" id="closeTimePicker" aria-label="Close time picker">&times;</button>
+                    </div>
+                    <div class="time-entry">
+                        <div class="time-entry-part">
+                            <input type="number" id="timePickerHour" min="1" max="12" value="8" inputmode="numeric" aria-label="Hour">
+                            <label for="timePickerHour">Hour</label>
+                        </div>
+                        <div class="time-colon" aria-hidden="true">:</div>
+                        <div class="time-entry-part">
+                            <input type="text" id="timePickerMinute" value="00" inputmode="numeric" maxlength="2" pattern="[0-9]{1,2}" aria-label="Minute">
+                            <label for="timePickerMinute">Minute</label>
+                        </div>
+                        <div class="time-period" aria-label="AM or PM">
+                            <button type="button" id="timePickerAm" class="is-active" data-period="AM">AM</button>
+                            <button type="button" id="timePickerPm" data-period="PM">PM</button>
+                        </div>
+                    </div>
+                    <p class="time-picker-error" id="timePickerError" role="alert"></p>
+                    <div class="time-picker-actions">
+                        <button type="button" class="time-picker-cancel" id="cancelTimePicker">Cancel</button>
+                        <button type="button" class="time-picker-apply" id="applyTimePicker">Use this time</button>
+                    </div>
+                </section>
+            </div>
             <script>
             (function() {
                 var form = document.getElementById('scheduleForm');
@@ -1214,80 +1314,190 @@ $stepLabels = [
                 var timeInp = document.getElementById('appointment_time');
                 var btnNext = document.getElementById('btnScheduleNext');
                 var calendar = document.getElementById('appointmentCalendar');
-                var selectedText = document.getElementById('selectedScheduleText');
-                if (!form || !actionField || !dateInp || !timeInp) return;
+                var selectedDateCard = document.querySelector('.selected-date-card');
+                var selectedDateText = document.getElementById('selectedDateText');
+                var timeButton = document.getElementById('appointmentTimeButton');
+                var timeLabel = document.getElementById('appointmentTimeLabel');
+                var timeWindow = document.getElementById('appointmentTimeWindow');
+                var picker = document.getElementById('appointmentTimePicker');
+                var pickerAvailability = document.getElementById('timePickerAvailability');
+                var pickerHour = document.getElementById('timePickerHour');
+                var pickerMinute = document.getElementById('timePickerMinute');
+                var pickerAm = document.getElementById('timePickerAm');
+                var pickerPm = document.getElementById('timePickerPm');
+                var pickerError = document.getElementById('timePickerError');
+                var closePickerButton = document.getElementById('closeTimePicker');
+                var cancelPickerButton = document.getElementById('cancelTimePicker');
+                var applyPickerButton = document.getElementById('applyTimePicker');
+                var activePeriod = 'AM';
+                var bodyOverflow = '';
+                if (!form || !actionField || !dateInp || !timeInp || !calendar || !timeButton || !picker) return;
 
                 function formatDateLabel(value) {
-                    if (!value) return 'Choose a date';
+                    if (!value) return 'Choose a date from the calendar';
                     var parts = value.split('-');
                     if (parts.length !== 3) return value;
                     var dt = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
                     return dt.toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' });
                 }
                 function formatTimeLabel(value) {
-                    if (!value) return '';
+                    if (!value) return 'Choose appointment time';
                     var parts = value.split(':');
                     var hour = Number(parts[0] || 0);
                     var minute = parts[1] || '00';
                     var suffix = hour >= 12 ? 'PM' : 'AM';
                     var displayHour = hour % 12 || 12;
-                    return ' at ' + displayHour + ':' + minute + ' ' + suffix;
+                    return displayHour + ':' + minute + ' ' + suffix;
                 }
-                function updateScheduleText() {
-                    if (!selectedText) return;
-                    selectedText.textContent = formatDateLabel(dateInp.value) + formatTimeLabel(timeInp.value);
+                function toMinutes(value) {
+                    var parts = (value || '').split(':');
+                    return Number(parts[0] || 0) * 60 + Number(parts[1] || 0);
                 }
-                function updateCalendarSelected() {
-                    if (!calendar) return;
+                function selectedDay() {
+                    return calendar.querySelector('.cal-day[data-date="' + dateInp.value + '"]');
+                }
+                function selectedWindows() {
+                    var day = selectedDay();
+                    if (!day) return [];
+                    return (day.getAttribute('data-time-windows') || '').split(',').map(function(windowText) {
+                        var parts = windowText.split('-');
+                        return parts.length === 2 ? { start: parts[0], end: parts[1] } : null;
+                    }).filter(Boolean);
+                }
+                function isTimeAllowed(value) {
+                    if (!value) return false;
+                    var candidate = toMinutes(value);
+                    return selectedWindows().some(function(windowItem) {
+                        return candidate >= toMinutes(windowItem.start) && candidate <= toMinutes(windowItem.end);
+                    });
+                }
+                function windowLabel() {
+                    var windows = selectedWindows();
+                    if (!dateInp.value) return 'Choose a date first to see available hours.';
+                    if (!windows.length) return 'No available time on this date.';
+                    return 'Available: ' + windows.map(function(windowItem) {
+                        return formatTimeLabel(windowItem.start) + ' - ' + formatTimeLabel(windowItem.end);
+                    }).join(', ');
+                }
+                function updatePeriod(period) {
+                    activePeriod = period;
+                    pickerAm.classList.toggle('is-active', period === 'AM');
+                    pickerPm.classList.toggle('is-active', period === 'PM');
+                }
+                function loadPickerValue() {
+                    var value = timeInp.value;
+                    if (!value || !isTimeAllowed(value)) {
+                        var windows = selectedWindows();
+                        value = windows.length ? windows[0].start : '08:00';
+                    }
+                    var parts = value.split(':');
+                    var hour24 = Number(parts[0] || 8);
+                    pickerHour.value = String(hour24 % 12 || 12);
+                    pickerMinute.value = String(Number(parts[1] || 0)).padStart(2, '0');
+                    updatePeriod(hour24 >= 12 ? 'PM' : 'AM');
+                }
+                function updateView() {
+                    if (selectedDateText) {
+                        selectedDateText.textContent = formatDateLabel(dateInp.value);
+                    }
                     calendar.querySelectorAll('.cal-day').forEach(function(day) {
                         day.classList.toggle('is-selected', day.getAttribute('data-date') === dateInp.value);
                     });
+                    timeButton.disabled = !dateInp.value;
+                    timeLabel.textContent = formatTimeLabel(timeInp.value);
+                    timeWindow.textContent = windowLabel();
+                    timeButton.classList.toggle('is-invalid', dateInp.value !== '' && !timeInp.value);
                 }
-                function updateSchedulePreview() {
-                    updateScheduleText();
-                    updateCalendarSelected();
-                    validateClinicSchedule();
+                function openPicker() {
+                    if (!dateInp.value) return;
+                    loadPickerValue();
+                    pickerError.textContent = '';
+                    pickerAvailability.textContent = windowLabel();
+                    bodyOverflow = document.body.style.overflow;
+                    document.body.style.overflow = 'hidden';
+                    picker.hidden = false;
+                    pickerHour.focus();
                 }
-                function validateClinicSchedule() {
-                    dateInp.setCustomValidity('');
-                    timeInp.setCustomValidity('');
-                    if (dateInp.value) {
-                        var dateParts = dateInp.value.split('-');
-                        var selectedDate = new Date(Number(dateParts[0]), Number(dateParts[1]) - 1, Number(dateParts[2]));
-                        if (selectedDate.getDay() === 0) {
-                            dateInp.setCustomValidity('The clinic is closed on Sunday. Choose Monday to Saturday.');
+                function closePicker() {
+                    picker.hidden = true;
+                    document.body.style.overflow = bodyOverflow;
+                    timeButton.focus();
+                }
+                function enteredTime() {
+                    var hour = Number(pickerHour.value);
+                    var minuteText = String(pickerMinute.value || '').trim();
+                    var minute = Number(minuteText);
+                    if (!Number.isInteger(hour) || hour < 1 || hour > 12 || !/^\d{1,2}$/.test(minuteText) || !Number.isInteger(minute) || minute < 0 || minute > 59) {
+                        return '';
+                    }
+                    var hour24 = hour % 12;
+                    if (activePeriod === 'PM') hour24 += 12;
+                    return String(hour24).padStart(2, '0') + ':' + String(minute).padStart(2, '0');
+                }
+
+                calendar.querySelectorAll('.cal-day').forEach(function(day) {
+                    day.addEventListener('click', function() {
+                        if (day.disabled) return;
+                        dateInp.value = day.getAttribute('data-date') || '';
+                        if (!isTimeAllowed(timeInp.value)) {
+                            timeInp.value = '';
                         }
-                    }
-                    if (timeInp.value && (timeInp.value < '08:00' || timeInp.value > '17:00')) {
-                        timeInp.setCustomValidity('Choose a time from 8:00 AM to 5:00 PM.');
-                    }
-                }
-                dateInp.addEventListener('change', updateSchedulePreview);
-                timeInp.addEventListener('change', updateSchedulePreview);
-                if (calendar) {
-                    calendar.querySelectorAll('.cal-day').forEach(function(day) {
-                        day.addEventListener('click', function() {
-                            if (day.disabled) return;
-                            dateInp.value = day.getAttribute('data-date') || '';
-                            updateSchedulePreview();
-                        });
+                        selectedDateCard.classList.remove('is-invalid');
+                        updateView();
                     });
-                }
+                });
+
+                timeButton.addEventListener('click', openPicker);
+                pickerAm.addEventListener('click', function() { updatePeriod('AM'); });
+                pickerPm.addEventListener('click', function() { updatePeriod('PM'); });
+                closePickerButton.addEventListener('click', closePicker);
+                cancelPickerButton.addEventListener('click', closePicker);
+                picker.addEventListener('click', function(event) {
+                    if (event.target === picker) closePicker();
+                });
+                applyPickerButton.addEventListener('click', function() {
+                    var value = enteredTime();
+                    if (!value) {
+                        pickerError.textContent = 'Enter a valid hour and minute.';
+                        return;
+                    }
+                    if (!isTimeAllowed(value)) {
+                        pickerError.textContent = 'Choose a time inside the available hours shown above.';
+                        return;
+                    }
+                    timeInp.value = value;
+                    timeButton.classList.remove('is-invalid');
+                    updateView();
+                    closePicker();
+                });
+                document.addEventListener('keydown', function(event) {
+                    if (event.key === 'Escape' && !picker.hidden) closePicker();
+                });
 
                 if (btnNext) {
                     btnNext.addEventListener('click', function() {
                         actionField.value = 'set_schedule';
                     });
                 }
-                form.addEventListener('submit', function() {
-                    validateClinicSchedule();
-                    if (actionField.value !== 'refresh_schedule') {
-                        actionField.value = 'set_schedule';
+                form.addEventListener('submit', function(event) {
+                    actionField.value = 'set_schedule';
+                    if (!dateInp.value) {
+                        event.preventDefault();
+                        selectedDateCard.classList.add('is-invalid');
+                        selectedDateText.textContent = 'Choose a date from the calendar';
+                        calendar.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        return;
+                    }
+                    if (!timeInp.value || !isTimeAllowed(timeInp.value)) {
+                        event.preventDefault();
+                        timeButton.classList.add('is-invalid');
+                        openPicker();
                     }
                 });
-                updateScheduleText();
-                updateCalendarSelected();
-                validateClinicSchedule();
+                if (timeInp.value && !isTimeAllowed(timeInp.value)) {
+                    timeInp.value = '';
+                }
+                updateView();
             })();
             </script>
             <a href="book_appointment.php?step_back=1" class="btn-secondary" style="margin-top:12px;display:inline-block;">Back</a>
