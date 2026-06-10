@@ -17,6 +17,33 @@ if ($currentPage === 'index.php') {
 if (isLoggedIn()) {
     $logoHref = dashboardForRole($currentUser['role']);
 }
+if (
+    isLoggedIn()
+    && ($currentUser['role'] ?? '') === 'patient'
+    && ($headerPatientPhotoUrl === null || $headerPatientInitials === null || $headerPatientDisplayName === null)
+) {
+    $profileHelperPath = __DIR__ . '/patient_profile_photo.php';
+    if (is_file($profileHelperPath)) {
+        require_once $profileHelperPath;
+    }
+    if (function_exists('patientProfileHeaderDetails') && function_exists('getDBConnection')) {
+        try {
+            $headerProfileConn = getDBConnection();
+            $headerProfile = patientProfileHeaderDetails(
+                $headerProfileConn,
+                (int) ($currentUser['id'] ?? 0),
+                (string) ($currentUser['full_name'] ?? 'Patient')
+            );
+            $headerProfileConn->close();
+            $headerPatientPhotoUrl = $headerPatientPhotoUrl ?? $headerProfile['photo_url'];
+            $headerPatientInitials = $headerPatientInitials ?? $headerProfile['initials'];
+            $headerPatientDisplayName = $headerPatientDisplayName ?? $headerProfile['name'];
+        } catch (Throwable $e) {
+            $headerPatientInitials = $headerPatientInitials ?? strtoupper(substr((string) ($currentUser['full_name'] ?? 'P'), 0, 1));
+            $headerPatientDisplayName = $headerPatientDisplayName ?? (string) ($currentUser['full_name'] ?? 'Patient');
+        }
+    }
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -371,7 +398,11 @@ if (isLoggedIn()) {
             height: 45px;
         }
         .user-info {
-            display: none;
+            display: flex;
+            margin: 0 0 8px;
+            border-radius: 12px;
+            background: rgba(255, 255, 255, 0.14);
+            justify-content: flex-start;
         }
     }
     </style>

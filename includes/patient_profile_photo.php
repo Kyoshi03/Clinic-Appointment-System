@@ -67,10 +67,44 @@ function savePatientProfilePhotoFromBase64(int $patientId, string $dataUri, ?str
 function patientProfilePhotoUrl(?string $path, ?string $updatedAt = null): ?string {
     $path = trim((string) $path);
     if ($path === '') return null;
-    $full = dirname(__DIR__) . '/' . ltrim($path, '/\\');
+    $normalizedPath = str_replace('\\', '/', ltrim($path, '/\\'));
+    if (preg_match('#^https?://#i', $normalizedPath)) {
+        return $normalizedPath;
+    }
+    $full = dirname(__DIR__) . '/' . $normalizedPath;
     if (!is_file($full)) return null;
     $version = $updatedAt ? strtotime($updatedAt) : filemtime($full);
-    return $path . ($version ? '?v=' . $version : '');
+    return $normalizedPath . ($version ? '?v=' . $version : '');
+}
+
+function patientProfileHeaderDetails(mysqli $conn, int $patientId, string $fallbackName = 'Patient'): array {
+    ensurePatientProfilePhotoColumn($conn);
+    $stmt = $conn->prepare('SELECT full_name, profile_photo, profile_updated_at FROM users WHERE id = ? AND role = ? LIMIT 1');
+    if (!$stmt) {
+        return [
+            'name' => $fallbackName,
+            'first_name' => explode(' ', trim($fallbackName))[0] ?? 'Patient',
+            'initials' => patientProfileInitials($fallbackName),
+            'photo_url' => null,
+        ];
+    }
+    $role = 'patient';
+    $stmt->bind_param('is', $patientId, $role);
+    $stmt->execute();
+    $row = $stmt->get_result()->fetch_assoc() ?: [];
+    $stmt->close();
+
+    $name = trim((string) ($row['full_name'] ?? $fallbackName));
+    if ($name === '') {
+        $name = 'Patient';
+    }
+
+    return [
+        'name' => $name,
+        'first_name' => explode(' ', $name)[0] ?? 'Patient',
+        'initials' => patientProfileInitials($name),
+        'photo_url' => patientProfilePhotoUrl($row['profile_photo'] ?? null, $row['profile_updated_at'] ?? null),
+    ];
 }
 
 function updatePatientUserProfile(mysqli $conn, int $patientId, array $fields, ?string $photoPath, bool $removePhoto = false): array {
