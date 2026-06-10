@@ -281,6 +281,12 @@ function initDatabase() {
             $conn->query("ALTER TABLE users ADD COLUMN {$col[0]} {$col[1]} {$after}");
         }
     }
+
+    $emailColumn = $conn->query("SHOW COLUMNS FROM users LIKE 'email'");
+    $emailInfo = $emailColumn ? $emailColumn->fetch_assoc() : null;
+    if ($emailInfo && strtoupper((string) ($emailInfo['Null'] ?? '')) !== 'YES') {
+        $conn->query("ALTER TABLE users MODIFY email VARCHAR(100) DEFAULT NULL");
+    }
     
     // Create appointments table
     $conn->query("CREATE TABLE IF NOT EXISTS appointments (

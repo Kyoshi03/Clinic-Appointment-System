@@ -169,8 +169,10 @@ function appointment_validate_payload(mysqli $conn, int $patientId, array $paylo
     if (!$patient) {
         return ['ok' => false, 'error' => 'Your patient account could not be found. Please sign in again.'];
     }
-    if (!filter_var((string) ($patient['email'] ?? ''), FILTER_VALIDATE_EMAIL)) {
-        return ['ok' => false, 'error' => 'Add a valid email address to your patient profile before booking an appointment.'];
+    $patientEmailValid = filter_var((string) ($patient['email'] ?? ''), FILTER_VALIDATE_EMAIL);
+    $patientPhoneValid = clinic_sms_normalize_phone((string) ($patient['phone'] ?? '')) !== null;
+    if (!$patientEmailValid && !$patientPhoneValid) {
+        return ['ok' => false, 'error' => 'Add a valid Philippine mobile number to your patient profile before booking an appointment.'];
     }
 
     $channel = 'opd';
@@ -205,10 +207,15 @@ function appointment_issue_verification(
     array $payload,
     string $verificationChannel = 'email'
 ): array {
-    $verificationChannel = $verificationChannel === 'sms' ? 'sms' : 'email';
     $validated = appointment_validate_payload($conn, $patientId, $payload);
     if (!$validated['ok']) {
         return $validated;
+    }
+    $patientEmail = (string) ($validated['patient']['email'] ?? '');
+    $patientPhone = (string) ($validated['patient']['phone'] ?? '');
+    $verificationChannel = $verificationChannel === 'sms' ? 'sms' : 'email';
+    if ($verificationChannel === 'email' && !filter_var($patientEmail, FILTER_VALIDATE_EMAIL)) {
+        $verificationChannel = 'sms';
     }
 
     $json = json_encode($validated['booking'], JSON_UNESCAPED_SLASHES);
@@ -244,8 +251,8 @@ function appointment_issue_verification(
 
     $code = (string) random_int(100000, 999999);
     $hash = password_hash($code, PASSWORD_DEFAULT);
-    $email = (string) $validated['patient']['email'];
-    $phone = (string) $validated['patient']['phone'];
+    $email = $patientEmail;
+    $phone = $patientPhone;
     if ($verificationChannel === 'sms' && clinic_sms_normalize_phone($phone) === null) {
         return ['ok' => false, 'error' => 'Add a valid Philippine mobile number to your profile before choosing SMS verification.'];
     }

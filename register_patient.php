@@ -42,8 +42,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $date_of_birth = $_POST['date_of_birth'] ?? '';
     $civil_status = trim($_POST['civil_status'] ?? '');
     $phone = trim($_POST['phone'] ?? '');
-    $email = trim($_POST['email'] ?? '');
+    $email = strtolower(trim($_POST['email'] ?? ''));
     $verification_channel = strtolower(trim($_POST['verification_channel'] ?? 'email'));
+    if ($email === '' && $verification_channel === 'email') {
+        $verification_channel = 'sms';
+    }
     $barangay = trim($_POST['barangay'] ?? '');
     $city = trim($_POST['city'] ?? '');
     $address = trim($_POST['address'] ?? '');
@@ -94,7 +97,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
     
     // Validation
-    if (empty($full_name) || empty($gender) || empty($date_of_birth) || empty($phone) || empty($email) || empty($barangay) || empty($city) || empty($username) || empty($password) || empty($confirm_password)) {
+    if (empty($full_name) || empty($gender) || empty($date_of_birth) || empty($phone) || empty($barangay) || empty($city) || empty($username) || empty($password) || empty($confirm_password)) {
         $error = 'Please fill in all required fields marked with *.';
     } elseif ($fullNameLength > 15) {
         $error = 'Full name must not exceed 15 characters.';
@@ -107,12 +110,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } elseif ($password !== $confirm_password) {
         $showPasswordPopup = true;
         $passwordPopupMessage = 'Password and confirm password do not match. Please type them again.';
-    } elseif (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+    } elseif ($email !== '' && !filter_var($email, FILTER_VALIDATE_EMAIL)) {
         $error = 'Please enter a valid email address.';
     } elseif (!in_array($verification_channel, ['email', 'sms'], true)) {
         $error = 'Please choose where you want to receive the verification code.';
-    } elseif ($verification_channel === 'sms' && clinic_sms_normalize_phone($phone) === null) {
-        $error = 'Enter a valid Philippine mobile number, such as 09171234567, for SMS verification.';
+    } elseif ($verification_channel === 'email' && $email === '') {
+        $error = 'Enter an email address or choose SMS verification instead.';
+    } elseif (clinic_sms_normalize_phone($phone) === null) {
+        $error = 'Enter a valid Philippine mobile number, such as 09171234567.';
     } else {
         // Validate password requirements
         $passwordErrors = validatePassword($password);
@@ -134,17 +139,38 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } else {
             $stmt->close();
             
-            // Check if email already exists
-            $stmt = $conn->prepare("SELECT id FROM users WHERE email = ?");
-            $stmt->bind_param("s", $email);
+            $normalizedPhone = clinic_sms_normalize_phone($phone) ?? '';
+            $phoneLocal = '0' . substr($normalizedPhone, 3);
+            $phoneIntlNoPlus = substr($normalizedPhone, 1);
+
+            // Check if phone already exists
+            $stmt = $conn->prepare("SELECT id FROM users WHERE phone IN (?, ?, ?, ?) LIMIT 1");
+            $stmt->bind_param("ssss", $phone, $phoneLocal, $normalizedPhone, $phoneIntlNoPlus);
             $stmt->execute();
             $result = $stmt->get_result();
             
             if ($result->num_rows > 0) {
-                $error = 'Email already registered. Please use a different email.';
+                $error = 'Mobile number already registered. Please use a different number or sign in to your existing account.';
                 $stmt->close();
             } else {
                 $stmt->close();
+
+                if ($email !== '') {
+                    // Check if email already exists
+                    $stmt = $conn->prepare("SELECT id FROM users WHERE LOWER(email) = LOWER(?) LIMIT 1");
+                    $stmt->bind_param("s", $email);
+                    $stmt->execute();
+                    $result = $stmt->get_result();
+
+                    if ($result->num_rows > 0) {
+                        $error = 'Email already registered. Please use a different email or leave it blank and verify by SMS.';
+                        $stmt->close();
+                    } else {
+                        $stmt->close();
+                    }
+                }
+
+                if ($error === '') {
                 
                 // Hash password
                 $hashed_password = password_hash($password, PASSWORD_DEFAULT);
@@ -166,7 +192,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         'password' => $hashed_password,
                         'full_name' => $full_name,
                         'role' => $role,
-                        'email' => strtolower($email),
+                        'email' => $email,
                         'phone' => $phone,
                         'gender' => $gender,
                         'date_of_birth' => $date_of_birth,
@@ -189,7 +215,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 $sent = clinic_send_verification_code(
                     $verification_channel,
-                    strtolower($email),
+                    $email,
                     $phone,
                     $full_name,
                     $verificationCode,
@@ -203,6 +229,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $conn->close();
                     header('Location: verify_patient_email.php?sent=1');
                     exit();
+                }
                 }
             }
         }
@@ -805,6 +832,15 @@ $additionalStyles = '
         background: #eaf7fd;
         box-shadow: 0 0 0 3px rgba(12,131,195,.1);
     }
+    .verification-option.is-disabled {
+        opacity: .58;
+        cursor: not-allowed;
+        background: #f3f7fa;
+    }
+    .verification-option.is-disabled:has(input:checked) {
+        border-color: #d8e8f0;
+        box-shadow: none;
+    }
     .verification-option input {
         width: 18px;
         height: 18px;
@@ -1153,7 +1189,8 @@ $additionalStyles = '
                 <p class="reg-guide-title">Before you register</p>
                 <p>Use accurate details (same as your valid ID when possible). Our clinic uses this for appointments, lab results, and emergency contact.</p>
                 <ul>
-                    <li>Active mobile number and email (for reminders and password reset)</li>
+                    <li>Active mobile number for SMS verification and clinic reminders</li>
+                    <li>Email is optional, but helpful for password reset and email notices</li>
                     <li>A username you will remember — you need it every time you log in</li>
                     <li>Emergency contact (recommended for urgent clinic situations)</li>
                 </ul>
@@ -1285,23 +1322,29 @@ $additionalStyles = '
                         </div>
                         
                         <div class="form-group">
-                            <label for="email">Email Address</label>
+                            <label for="email">Email Address <span class="optional">(Optional)</span></label>
                             <div class="input-wrapper">
                                 <svg class="input-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
                                 </svg>
-                                <input type="email" id="email" name="email" placeholder="you@example.com" required value="<?php echo (!empty($success) ? '' : (isset($_POST['email']) ? htmlspecialchars($_POST['email']) : '')); ?>">
+                                <input type="email" id="email" name="email" placeholder="you@example.com" value="<?php echo (!empty($success) ? '' : (isset($_POST['email']) ? htmlspecialchars($_POST['email']) : '')); ?>">
                             </div>
-                            <span class="field-hint">Used for clinic notices, appointment details, and password recovery.</span>
+                            <span class="field-hint">Optional. If left blank, your verification code will be sent by SMS.</span>
                         </div>
                     </div>
 
-                    <?php $selectedVerificationChannel = strtolower((string) ($_POST['verification_channel'] ?? 'email')); ?>
+                    <?php
+                        $postedEmail = trim((string) ($_POST['email'] ?? ''));
+                        $selectedVerificationChannel = strtolower((string) ($_POST['verification_channel'] ?? ($postedEmail === '' ? 'sms' : 'email')));
+                        if ($postedEmail === '') {
+                            $selectedVerificationChannel = 'sms';
+                        }
+                    ?>
                     <div class="verification-choice">
                         <strong>Where should we send your verification code?</strong>
-                        <p>Choose one. The code must be verified before your account is created.</p>
+                        <p>Choose one. If you do not add an email, SMS will be used automatically.</p>
                         <div class="verification-options">
-                            <label class="verification-option">
+                            <label class="verification-option" id="emailVerificationOption">
                                 <input
                                     type="radio"
                                     name="verification_channel"
@@ -1310,7 +1353,7 @@ $additionalStyles = '
                                 >
                                 <span>
                                     <strong>Email</strong>
-                                    Send the code to the email address above.
+                                    Send the code to the email address above, if provided.
                                 </span>
                             </label>
                             <label class="verification-option">
@@ -1667,6 +1710,10 @@ $additionalStyles = '
             const confirmPasswordToggle = document.getElementById('confirmPasswordToggle');
             const fullNameInput = document.getElementById('full_name');
             const fullNameCounter = document.getElementById('fullNameCounter');
+            const emailInput = document.getElementById('email');
+            const emailVerificationOption = document.getElementById('emailVerificationOption');
+            const emailVerificationRadio = document.querySelector('input[name="verification_channel"][value="email"]');
+            const smsVerificationRadio = document.querySelector('input[name="verification_channel"][value="sms"]');
             const dateOfBirthInput = document.getElementById('date_of_birth');
             const dobPicker = document.getElementById('dobPicker');
             const dobPickerButton = document.getElementById('dobPickerButton');
@@ -1698,6 +1745,23 @@ $additionalStyles = '
             if (fullNameInput) {
                 fullNameInput.addEventListener('input', updateFullNameCounter);
                 updateFullNameCounter();
+            }
+
+            function updateVerificationChoices() {
+                if (!emailInput || !emailVerificationRadio || !smsVerificationRadio) return;
+                const hasEmail = emailInput.value.trim() !== '';
+                emailVerificationRadio.disabled = !hasEmail;
+                if (emailVerificationOption) {
+                    emailVerificationOption.classList.toggle('is-disabled', !hasEmail);
+                }
+                if (!hasEmail) {
+                    smsVerificationRadio.checked = true;
+                }
+            }
+
+            if (emailInput) {
+                emailInput.addEventListener('input', updateVerificationChoices);
+                updateVerificationChoices();
             }
 
             function parseYmd(value) {

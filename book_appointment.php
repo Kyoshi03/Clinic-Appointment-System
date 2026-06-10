@@ -60,7 +60,7 @@ if (isset($_GET['step_back'])) {
 $conn = getDBConnection();
 init_doctor_schema_and_accounts($conn);
 
-$headerStmt = $conn->prepare("SELECT full_name, profile_photo, profile_updated_at FROM users WHERE id = ?");
+$headerStmt = $conn->prepare("SELECT full_name, email, phone, profile_photo, profile_updated_at FROM users WHERE id = ?");
 $headerStmt->bind_param("i", $currentUser['id']);
 $headerStmt->execute();
 $patientHeaderDetails = $headerStmt->get_result()->fetch_assoc() ?: [];
@@ -68,6 +68,7 @@ $headerStmt->close();
 $headerPatientPhotoUrl = patientProfilePhotoUrl($patientHeaderDetails['profile_photo'] ?? null, $patientHeaderDetails['profile_updated_at'] ?? null);
 $headerPatientInitials = patientProfileInitials($patientHeaderDetails['full_name'] ?? $currentUser['full_name']);
 $headerPatientDisplayName = $patientHeaderDetails['full_name'] ?? $currentUser['full_name'];
+$patientCanUseEmailOtp = (bool) filter_var((string) ($patientHeaderDetails['email'] ?? ''), FILTER_VALIDATE_EMAIL);
 
 $error = '';
 $bookedId = isset($_GET['booked']) ? (int) $_GET['booked'] : 0;
@@ -668,6 +669,8 @@ $additionalStyles = '
     .verification-method-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
     .verification-method { display:flex; align-items:center; gap:10px; min-width:0; padding:12px 14px; border:2px solid #d8e8f0; border-radius:10px; background:#fff; cursor:pointer; }
     .verification-method:has(input:checked) { border-color:#0c83c3; background:#eaf7fd; box-shadow:0 0 0 3px rgba(12,131,195,.1); }
+    .verification-method.disabled-option { opacity:.58; cursor:not-allowed; background:#f4f8fb; }
+    .verification-method.disabled-option:has(input:checked) { border-color:#d8e8f0; background:#f4f8fb; box-shadow:none; }
     .verification-method input { width:18px; height:18px; margin:0; accent-color:#0c83c3; }
     .verification-method span { min-width:0; color:#466171; font-size:.84rem; line-height:1.35; }
     .verification-method strong { display:block; color:#073b4c; font-size:.92rem; }
@@ -1559,12 +1562,12 @@ $stepLabels = [
                     <strong>Where should we send the confirmation code?</strong>
                     <p>Choose one method before submitting your appointment request.</p>
                     <div class="verification-method-grid">
-                        <label class="verification-method">
-                            <input type="radio" name="verification_channel" value="email" checked>
-                            <span><strong>Email</strong>Send the code to your registered email.</span>
+                        <label class="verification-method<?php echo $patientCanUseEmailOtp ? '' : ' disabled-option'; ?>">
+                            <input type="radio" name="verification_channel" value="email" <?php echo $patientCanUseEmailOtp ? 'checked' : 'disabled'; ?>>
+                            <span><strong>Email</strong><?php echo $patientCanUseEmailOtp ? 'Send the code to your registered email.' : 'Add an email to your profile to use this.'; ?></span>
                         </label>
                         <label class="verification-method">
-                            <input type="radio" name="verification_channel" value="sms">
+                            <input type="radio" name="verification_channel" value="sms" <?php echo $patientCanUseEmailOtp ? '' : 'checked'; ?>>
                             <span><strong>SMS</strong>Text the code to your registered mobile number.</span>
                         </label>
                     </div>

@@ -87,9 +87,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $conn = getDBConnection();
 
             $username = (string) $patient['username'];
-            $email = (string) $patient['email'];
-            $check = $conn->prepare('SELECT id FROM users WHERE username = ? OR LOWER(email) = LOWER(?) LIMIT 1');
-            $check->bind_param('ss', $username, $email);
+            $email = trim((string) ($patient['email'] ?? ''));
+            $emailForInsert = $email === '' ? null : strtolower($email);
+            $phoneForCheck = (string) ($patient['phone'] ?? '');
+            $normalizedPhone = clinic_sms_normalize_phone($phoneForCheck) ?? $phoneForCheck;
+            $phoneLocal = str_starts_with($normalizedPhone, '+63') ? '0' . substr($normalizedPhone, 3) : $phoneForCheck;
+            $phoneIntlNoPlus = str_starts_with($normalizedPhone, '+') ? substr($normalizedPhone, 1) : $normalizedPhone;
+
+            if ($emailForInsert === null) {
+                $check = $conn->prepare('SELECT id FROM users WHERE username = ? OR phone IN (?, ?, ?) LIMIT 1');
+                $check->bind_param('ssss', $username, $phoneForCheck, $phoneLocal, $normalizedPhone);
+            } else {
+                $check = $conn->prepare('SELECT id FROM users WHERE username = ? OR LOWER(email) = LOWER(?) OR phone IN (?, ?, ?, ?) LIMIT 1');
+                $check->bind_param('ssssss', $username, $emailForInsert, $phoneForCheck, $phoneLocal, $normalizedPhone, $phoneIntlNoPlus);
+            }
             $check->execute();
             $exists = $check->get_result()->fetch_assoc();
             $check->close();
@@ -97,7 +108,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($exists) {
                 $conn->close();
                 unset($_SESSION['pending_patient_registration']);
-                $error = 'That username or email is already registered. Please start again.';
+                $error = 'That username, email, or mobile number is already registered. Please start again.';
             } else {
                 $passwordHash = (string) $patient['password'];
                 $fullName = (string) $patient['full_name'];
@@ -127,7 +138,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $passwordHash,
                     $fullName,
                     $role,
-                    $email,
+                    $emailForInsert,
                     $phone,
                     $gender,
                     $dateOfBirth,
