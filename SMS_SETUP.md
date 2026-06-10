@@ -23,10 +23,22 @@ Keep the GitHub repository private when production credentials are stored in tra
 Create a Hostinger cron job that runs every 5 or 10 minutes:
 
 ```text
-/usr/bin/php /home/YOUR_HOSTINGER_USER/domains/globalife.online/public_html/cron/send_appointment_reminders.php
+/usr/bin/php /home/u901773288/domains/globalife.online/public_html/cron/send_appointment_reminders.php
 ```
 
-Replace `YOUR_HOSTINGER_USER` with the actual account path shown in Hostinger File Manager. The command is CLI-only and cannot be opened as a public web page.
+If Hostinger says the file path is different, open **Files > File Manager**, open `public_html`, and copy the full path. The command must end with:
+
+```text
+/cron/send_appointment_reminders.php
+```
+
+Recommended Hostinger schedule:
+
+```text
+*/10 * * * *
+```
+
+That means the reminder checker runs every 10 minutes. The command is CLI-only and cannot be opened as a public web page.
 
 The reminder job tracks email and SMS separately. A failed SMS retry will not resend an email that was already delivered.
 
