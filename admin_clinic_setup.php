@@ -6,6 +6,38 @@ require_once 'config/database.php';
 require_once __DIR__ . '/includes/mailer.php';
 require_once __DIR__ . '/includes/sms.php';
 
+$smsTestNotice = (array) ($_SESSION['admin_sms_test_notice'] ?? []);
+unset($_SESSION['admin_sms_test_notice']);
+if (empty($_SESSION['admin_settings_csrf'])) {
+    $_SESSION['admin_settings_csrf'] = bin2hex(random_bytes(24));
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'send_test_sms') {
+    $submittedToken = (string) ($_POST['csrf_token'] ?? '');
+    $sessionToken = (string) ($_SESSION['admin_settings_csrf'] ?? '');
+    if ($sessionToken === '' || !hash_equals($sessionToken, $submittedToken)) {
+        $_SESSION['admin_sms_test_notice'] = [
+            'type' => 'error',
+            'message' => 'The test request expired. Refresh the page and try again.',
+        ];
+    } else {
+        $testPhone = (string) ($_POST['test_phone'] ?? '');
+        $testResult = clinic_send_sms_message(
+            $testPhone,
+            'Globalife test message: SMS notifications are working. No action is required.'
+        );
+        $_SESSION['admin_sms_test_notice'] = [
+            'type' => $testResult['ok'] ? 'success' : 'error',
+            'message' => $testResult['ok']
+                ? 'Test SMS sent successfully to ' . clinic_sms_mask_phone($testPhone) . '.'
+                : (string) ($testResult['error'] ?? 'The test SMS could not be sent.'),
+        ];
+    }
+
+    header('Location: admin_clinic_setup.php#email-otp');
+    exit();
+}
+
 $pageTitle = 'Admin Settings | Globalife Administration';
 $conn = getDBConnection();
 
@@ -117,6 +149,13 @@ body { background:#f4f8fb; color:#1f343d; }
 .settings-btn { display:inline-flex; align-items:center; justify-content:center; min-height:40px; min-width:132px; border-radius:8px; border:1px solid transparent; padding:9px 14px; background:#0f7cc2; color:#fff; font-weight:900; text-decoration:none; cursor:pointer; text-align:center; }
 .settings-btn.secondary { background:#eef7ff; color:#0b4f80; border-color:#d4e6f5; }
 .settings-btn.warn { background:#fff0f0; color:#9d1c2c; border-color:#ffd0d5; }
+.test-sms-form { display:grid; grid-template-columns:minmax(180px,1fr) auto; gap:10px; align-items:end; margin-top:16px; padding-top:16px; border-top:1px solid #e4edf2; }
+.test-sms-form label { display:grid; gap:6px; color:#365264; font-size:.82rem; font-weight:900; text-transform:uppercase; }
+.test-sms-form input { width:100%; min-height:42px; box-sizing:border-box; border:1px solid #cfe0ea; border-radius:8px; padding:9px 12px; color:#073b4c; font:inherit; background:#fff; }
+.test-sms-form input:focus { outline:0; border-color:#0f7cc2; box-shadow:0 0 0 3px rgba(15,124,194,.12); }
+.settings-notice { margin-top:14px; border-radius:8px; padding:11px 13px; font-weight:800; line-height:1.45; }
+.settings-notice.success { background:#eaf7ef; border:1px solid #bfe2ca; color:#17643a; }
+.settings-notice.error { background:#fff0f0; border:1px solid #ffd0d5; color:#9d1c2c; }
 .report-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
 .report-card { padding:18px; }
 .report-card h3 { margin:0 0 6px; color:#073b4c; font-size:1.08rem; }
@@ -126,7 +165,7 @@ body { background:#f4f8fb; color:#1f343d; }
 .activity-row strong { color:#073b4c; }
 .activity-row span { color:#60727d; font-size:.9rem; }
 @media(max-width:900px){.settings-hero,.settings-grid,.panel-grid,.report-grid{grid-template-columns:1fr}.summary-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
-@media(max-width:560px){.settings-page{padding:20px 12px 38px}.summary-grid{grid-template-columns:1fr}.hero-main{padding:22px}.hero-main h1{font-size:1.7rem}.detail-row,.activity-row{flex-direction:column}.detail-row strong{text-align:left}.settings-btn{width:100%}}
+@media(max-width:560px){.settings-page{padding:20px 12px 38px}.summary-grid{grid-template-columns:1fr}.hero-main{padding:22px}.hero-main h1{font-size:1.7rem}.detail-row,.activity-row{flex-direction:column}.detail-row strong{text-align:left}.settings-btn{width:100%}.test-sms-form{grid-template-columns:1fr}}
 ';
 
 include 'includes/header.php';
@@ -187,6 +226,20 @@ include 'includes/header.php';
                 <div class="detail-row"><span>Pending reminders</span><strong><?php echo $pendingReminders; ?></strong></div>
                 <div class="detail-row"><span>Failed reminder attempts</span><strong><?php echo $failedReminders; ?></strong></div>
             </div>
+            <?php if (!empty($smsTestNotice['message'])): ?>
+                <div class="settings-notice <?php echo $smsTestNotice['type'] === 'success' ? 'success' : 'error'; ?>">
+                    <?php echo htmlspecialchars((string) $smsTestNotice['message']); ?>
+                </div>
+            <?php endif; ?>
+            <form class="test-sms-form" method="POST" action="admin_clinic_setup.php">
+                <input type="hidden" name="action" value="send_test_sms">
+                <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars((string) $_SESSION['admin_settings_csrf']); ?>">
+                <label>
+                    Test mobile number
+                    <input type="tel" name="test_phone" inputmode="tel" placeholder="09171234567" pattern="(?:\+?63|0)?9\d{9}" required>
+                </label>
+                <button type="submit" class="settings-btn">Send test SMS</button>
+            </form>
         </div>
     </section>
 
