@@ -99,8 +99,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // Validation
     if (empty($full_name) || empty($gender) || empty($date_of_birth) || empty($phone) || empty($barangay) || empty($city) || empty($username) || empty($password) || empty($confirm_password)) {
         $error = 'Please fill in all required fields marked with *.';
-    } elseif ($fullNameLength > 15) {
-        $error = 'Full name must not exceed 15 characters.';
+    } elseif ($fullNameLength > 40) {
+        $error = 'Full name must not exceed 40 characters.';
     } elseif (!$birthDateIsValid) {
         $error = 'Please enter a valid date of birth.';
     } elseif ($date_of_birth > $todayDate) {
@@ -1219,9 +1219,9 @@ $additionalStyles = '
                             <svg class="input-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
                             </svg>
-                            <input type="text" id="full_name" name="full_name" placeholder="Enter your full name" maxlength="15" required autofocus value="<?php echo (!empty($success) ? '' : (isset($_POST['full_name']) ? htmlspecialchars($_POST['full_name']) : '')); ?>">
+                            <input type="text" id="full_name" name="full_name" placeholder="Enter your full name" maxlength="40" required autofocus value="<?php echo (!empty($success) ? '' : (isset($_POST['full_name']) ? htmlspecialchars($_POST['full_name']) : '')); ?>">
                         </div>
-                        <span class="field-hint">Maximum of 15 characters. <span id="fullNameCounter">0/15</span></span>
+                        <span class="field-hint">Maximum of 40 characters. <span id="fullNameCounter">0/40</span></span>
                     </div>
                     
                     <div class="form-row">
@@ -1739,7 +1739,7 @@ $additionalStyles = '
 
             function updateFullNameCounter() {
                 if (!fullNameInput || !fullNameCounter) return;
-                fullNameCounter.textContent = fullNameInput.value.length + '/15';
+                fullNameCounter.textContent = fullNameInput.value.length + '/40';
             }
 
             if (fullNameInput) {
