@@ -17,7 +17,14 @@ deploy_check_add($checks, 'PHP version', version_compare(PHP_VERSION, '8.0.0', '
 deploy_check_add($checks, 'index.php exists', is_file(__DIR__ . '/index.php'), 'Root homepage file');
 deploy_check_add($checks, 'globalife.png exists', is_file(__DIR__ . '/globalife.png'), 'Logo asset');
 deploy_check_add($checks, 'includes/session.php exists', is_file(__DIR__ . '/includes/session.php'), 'Session helper');
-deploy_check_add($checks, 'uploads folder writable', is_dir(__DIR__ . '/uploads') && is_writable(__DIR__ . '/uploads'), 'Needed for profile photos');
+require_once __DIR__ . '/includes/patient_profile_photo.php';
+$profileStorageDir = patientProfileUploadDir();
+deploy_check_add(
+    $checks,
+    'profile photo storage writable',
+    is_dir($profileStorageDir) && is_writable($profileStorageDir),
+    'Needed for patient profile photos outside Git deploy cleanup'
+);
 deploy_check_add($checks, 'OpenSSL for secure SMTP', extension_loaded('openssl'), 'Required for SSL/TLS email delivery');
 
 require_once __DIR__ . '/includes/mailer.php';

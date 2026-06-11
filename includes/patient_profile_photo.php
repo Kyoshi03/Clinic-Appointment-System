@@ -24,20 +24,67 @@ function patientProfileInitials(?string $name): string {
 }
 
 function patientProfileUploadDir(): string {
-    $dir = dirname(__DIR__) . '/uploads/patient_photos';
+    $dir = patientProfileStorageRoot() . '/patient_photos';
     if (!is_dir($dir)) {
         @mkdir($dir, 0777, true);
     }
     return $dir;
 }
 
+function patientProfileStorageRoot(): string {
+    static $root = null;
+    if ($root !== null) {
+        return $root;
+    }
+
+    $publicRoot = dirname(__DIR__);
+    $persistentRoot = dirname($publicRoot) . '/globalife_storage';
+    if (is_dir($persistentRoot) || @mkdir($persistentRoot, 0777, true)) {
+        $root = $persistentRoot;
+        return $root;
+    }
+
+    $fallbackRoot = $publicRoot . '/storage';
+    if (!is_dir($fallbackRoot)) {
+        @mkdir($fallbackRoot, 0777, true);
+    }
+    $root = $fallbackRoot;
+    return $root;
+}
+
+function patientProfileStorageFilePath(string $file): ?string {
+    $file = basename(str_replace('\\', '/', $file));
+    if (!preg_match('/^patient_\d+_[A-Za-z0-9_.-]+\.(jpg|jpeg|png|webp)$/i', $file)) {
+        return null;
+    }
+    return patientProfileUploadDir() . '/' . $file;
+}
+
+function patientProfilePathIsStored(string $path): bool {
+    $normalized = str_replace('\\', '/', ltrim($path, '/\\'));
+    return str_starts_with($normalized, 'patient_photos/');
+}
+
 function patientDeleteProfilePhotoFile(?string $path): void {
     $path = trim((string) $path);
     if ($path === '') return;
+
+    if (patientProfilePathIsStored($path)) {
+        $full = patientProfileStorageFilePath(basename($path));
+        if ($full && is_file($full)) {
+            @unlink($full);
+        }
+        return;
+    }
+
     $base = realpath(dirname(__DIR__));
     $full = realpath(dirname(__DIR__) . '/' . ltrim($path, '/\\'));
     if ($base && $full && strpos($full, $base) === 0 && is_file($full)) {
         @unlink($full);
+    }
+    $storedCopy = patientProfileStorageFilePath(basename($path));
+    if ($storedCopy && is_file($storedCopy)) {
+        @unlink($storedCopy);
     }
 }
 
@@ -55,13 +102,14 @@ function savePatientProfilePhotoFromBase64(int $patientId, string $dataUri, ?str
         return null;
     }
     $dir = patientProfileUploadDir();
-    $file = 'patient_' . $patientId . '_' . time() . '.' . $ext;
+    $random = bin2hex(random_bytes(6));
+    $file = 'patient_' . $patientId . '_' . date('YmdHis') . '_' . $random . '.' . $ext;
     $full = $dir . '/' . $file;
     if (@file_put_contents($full, $bytes) === false) {
         return null;
     }
     patientDeleteProfilePhotoFile($oldPath);
-    return 'uploads/patient_photos/' . $file;
+    return 'patient_photos/' . $file;
 }
 
 function patientProfilePhotoUrl(?string $path, ?string $updatedAt = null): ?string {
@@ -71,7 +119,25 @@ function patientProfilePhotoUrl(?string $path, ?string $updatedAt = null): ?stri
     if (preg_match('#^https?://#i', $normalizedPath)) {
         return $normalizedPath;
     }
+    if (patientProfilePathIsStored($normalizedPath)) {
+        $file = basename($normalizedPath);
+        $full = patientProfileStorageFilePath($file);
+        if (!$full || !is_file($full)) return null;
+        $version = $updatedAt ? strtotime($updatedAt) : filemtime($full);
+        return 'patient_photo.php?file=' . rawurlencode($file) . ($version ? '&v=' . $version : '');
+    }
     $full = dirname(__DIR__) . '/' . $normalizedPath;
+    if (str_starts_with($normalizedPath, 'uploads/patient_photos/')) {
+        $file = basename($normalizedPath);
+        $stored = patientProfileStorageFilePath($file);
+        if ($stored && !is_file($stored) && is_file($full)) {
+            @copy($full, $stored);
+        }
+        if ($stored && is_file($stored)) {
+            $version = $updatedAt ? strtotime($updatedAt) : filemtime($stored);
+            return 'patient_photo.php?file=' . rawurlencode($file) . ($version ? '&v=' . $version : '');
+        }
+    }
     if (!is_file($full)) return null;
     $version = $updatedAt ? strtotime($updatedAt) : filemtime($full);
     return $normalizedPath . ($version ? '?v=' . $version : '');
