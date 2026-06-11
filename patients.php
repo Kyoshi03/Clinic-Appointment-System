@@ -1392,6 +1392,10 @@ $additionalStyles = '
         font-size: 2.2rem;
     }
 
+    .photo-preview-wrap.has-photo .photo-fallback {
+        display: none;
+    }
+
     .photo-preview-overlay {
         position: absolute;
         left: 10px;
@@ -2069,12 +2073,11 @@ include 'includes/header.php';
                 <div class="photo-editor-panel">
                     <h4>Profile picture</h4>
                     <p class="photo-help-text">Add or change your picture, then crop and zoom it before saving.</p>
-                    <label class="photo-preview-wrap" id="photoPreviewWrap" for="profilePhotoInput" aria-label="Add or change profile picture">
+                    <label class="photo-preview-wrap<?php echo $profilePhotoUrl ? ' has-photo' : ''; ?>" id="photoPreviewWrap" for="profilePhotoInput" aria-label="Add or change profile picture">
                         <?php if ($profilePhotoUrl): ?>
-                            <img src="<?php echo htmlspecialchars($profilePhotoUrl); ?>" alt="Current profile photo">
-                        <?php else: ?>
-                            <span class="patient-profile-avatar"><?php echo htmlspecialchars($profileInitials); ?></span>
+                            <img src="<?php echo htmlspecialchars($profilePhotoUrl); ?>" alt="Current profile photo" onerror="this.style.display='none';this.nextElementSibling.style.display='flex';this.closest('.photo-preview-wrap').classList.remove('has-photo');">
                         <?php endif; ?>
+                        <span class="patient-profile-avatar photo-fallback" <?php echo $profilePhotoUrl ? 'style="display:none;"' : ''; ?>><?php echo htmlspecialchars($profileInitials); ?></span>
                         <span class="photo-preview-overlay">
                             <span class="photo-preview-icon">+</span>
                             <span class="photo-preview-copy">

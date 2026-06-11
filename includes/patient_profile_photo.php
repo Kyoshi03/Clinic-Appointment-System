@@ -31,24 +31,34 @@ function patientProfileUploadDir(): string {
     return $dir;
 }
 
+function patientProfileStorageRoots(): array {
+    $publicRoot = dirname(__DIR__);
+    return [
+        dirname($publicRoot) . '/globalife_storage',
+        $publicRoot . '/storage',
+    ];
+}
+
 function patientProfileStorageRoot(): string {
     static $root = null;
     if ($root !== null) {
         return $root;
     }
 
-    $publicRoot = dirname(__DIR__);
-    $persistentRoot = dirname($publicRoot) . '/globalife_storage';
-    if (is_dir($persistentRoot) || @mkdir($persistentRoot, 0777, true)) {
-        $root = $persistentRoot;
-        return $root;
+    foreach (patientProfileStorageRoots() as $candidateRoot) {
+        if (!is_dir($candidateRoot)) {
+            @mkdir($candidateRoot, 0777, true);
+        }
+        if (is_dir($candidateRoot) && is_writable($candidateRoot)) {
+            $root = $candidateRoot;
+            return $root;
+        }
     }
 
-    $fallbackRoot = $publicRoot . '/storage';
-    if (!is_dir($fallbackRoot)) {
-        @mkdir($fallbackRoot, 0777, true);
+    $root = dirname(__DIR__) . '/storage';
+    if (!is_dir($root)) {
+        @mkdir($root, 0777, true);
     }
-    $root = $fallbackRoot;
     return $root;
 }
 
@@ -57,7 +67,27 @@ function patientProfileStorageFilePath(string $file): ?string {
     if (!preg_match('/^patient_\d+_[A-Za-z0-9_.-]+\.(jpg|jpeg|png|webp)$/i', $file)) {
         return null;
     }
+
+    foreach (patientProfileStorageRoots() as $root) {
+        $candidate = $root . '/patient_photos/' . $file;
+        if (is_file($candidate)) {
+            return $candidate;
+        }
+    }
+
     return patientProfileUploadDir() . '/' . $file;
+}
+
+function patientProfileStorageFileCandidates(string $file): array {
+    $file = basename(str_replace('\\', '/', $file));
+    if (!preg_match('/^patient_\d+_[A-Za-z0-9_.-]+\.(jpg|jpeg|png|webp)$/i', $file)) {
+        return [];
+    }
+
+    return array_map(
+        static fn (string $root): string => $root . '/patient_photos/' . $file,
+        patientProfileStorageRoots()
+    );
 }
 
 function patientProfilePathIsStored(string $path): bool {
@@ -70,9 +100,10 @@ function patientDeleteProfilePhotoFile(?string $path): void {
     if ($path === '') return;
 
     if (patientProfilePathIsStored($path)) {
-        $full = patientProfileStorageFilePath(basename($path));
-        if ($full && is_file($full)) {
-            @unlink($full);
+        foreach (patientProfileStorageFileCandidates(basename($path)) as $candidate) {
+            if (is_file($candidate)) {
+                @unlink($candidate);
+            }
         }
         return;
     }
@@ -82,9 +113,10 @@ function patientDeleteProfilePhotoFile(?string $path): void {
     if ($base && $full && strpos($full, $base) === 0 && is_file($full)) {
         @unlink($full);
     }
-    $storedCopy = patientProfileStorageFilePath(basename($path));
-    if ($storedCopy && is_file($storedCopy)) {
-        @unlink($storedCopy);
+    foreach (patientProfileStorageFileCandidates(basename($path)) as $candidate) {
+        if (is_file($candidate)) {
+            @unlink($candidate);
+        }
     }
 }
 
