@@ -7,6 +7,7 @@ require_once 'config/database.php';
 $currentUser = getCurrentUser();
 $error = '';
 $success = '';
+$rprFullNameMax = 40;
 
 function rpr_value(string $key): string {
     return isset($_POST[$key]) ? htmlspecialchars((string) $_POST[$key]) : '';
@@ -59,8 +60,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
     
     // Validation
+    $fullNameLength = function_exists('mb_strlen') ? mb_strlen($full_name) : strlen($full_name);
+
     if (empty($full_name) || empty($gender) || empty($date_of_birth) || empty($phone) || empty($email) || empty($barangay) || empty($city) || empty($username) || empty($password) || empty($confirm_password)) {
         $error = 'Please fill in all required fields.';
+    } elseif ($fullNameLength > $rprFullNameMax) {
+        $error = 'Full name must not exceed ' . $rprFullNameMax . ' characters.';
     } elseif (!$birthDateIsValid) {
         $error = 'Please enter a valid date of birth.';
     } elseif ($birthDate > new DateTime('today')) {
@@ -796,7 +801,8 @@ include 'includes/header.php';
 
                         <div class="form-group">
                             <label for="full_name">Full name <span class="required">*</span></label>
-                            <input type="text" id="full_name" name="full_name" required placeholder="Juan Dela Cruz" value="<?php echo rpr_value('full_name'); ?>">
+                            <input type="text" id="full_name" name="full_name" required maxlength="<?php echo $rprFullNameMax; ?>" placeholder="Juan Dela Cruz" value="<?php echo rpr_value('full_name'); ?>">
+                            <span class="field-hint">Maximum of <?php echo $rprFullNameMax; ?> characters.</span>
                         </div>
 
                         <div class="form-row">
@@ -1181,4 +1187,3 @@ document.addEventListener('DOMContentLoaded', function () {
 </script>
 
 <?php include 'includes/footer.php'; ?>
-

@@ -238,7 +238,13 @@ function clinic_send_sms_code(string $phone, string $code, string $purpose): arr
         return ['ok' => false, 'error' => 'Enter a valid Philippine mobile number, such as 09171234567.'];
     }
 
-    $label = $purpose === 'appointment' ? 'appointment confirmation' : 'account verification';
+    if ($purpose === 'appointment') {
+        $label = 'appointment confirmation';
+    } elseif ($purpose === 'profile_update') {
+        $label = 'profile change';
+    } else {
+        $label = 'account verification';
+    }
     $message = 'Globalife ' . $label . ' code: ' . $code
         . '. Valid for 10 minutes. Do not share this code.';
 

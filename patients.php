@@ -6,6 +6,153 @@ require_once 'config/database.php';
 require_once 'includes/patient_profile_photo.php';
 require_once 'includes/nurse_medical_fields.php';
 require_once 'includes/password_reset.php';
+require_once 'includes/sms.php';
+
+const PATIENT_PROFILE_NAME_MAX = 40;
+const PATIENT_PROFILE_VERIFY_SESSION = 'patient_profile_pending_change';
+
+function patient_profile_mask_email(string $email): string {
+    $email = trim($email);
+    if ($email === '' || strpos($email, '@') === false) {
+        return $email;
+    }
+    [$name, $domain] = explode('@', $email, 2);
+    $prefix = substr($name, 0, 2);
+    return $prefix . str_repeat('*', max(3, strlen($name) - 2)) . '@' . $domain;
+}
+
+function patient_profile_mask_phone(string $phone): string {
+    $digits = preg_replace('/\D+/', '', $phone);
+    if ($digits === '') {
+        return '';
+    }
+    return str_repeat('*', max(0, strlen($digits) - 4)) . substr($digits, -4);
+}
+
+function patient_profile_pending_change(): ?array {
+    $pending = $_SESSION[PATIENT_PROFILE_VERIFY_SESSION] ?? null;
+    if (!is_array($pending)) {
+        return null;
+    }
+    if ((int) ($pending['expires_at'] ?? 0) <= time()) {
+        unset($_SESSION[PATIENT_PROFILE_VERIFY_SESSION]);
+        return null;
+    }
+    return $pending;
+}
+
+function patient_profile_sensitive_delivery(array $currentUserRow, string $newEmail, string $newPhone, bool $emailChanged): array {
+    $currentEmail = trim((string) ($currentUserRow['email'] ?? ''));
+    $currentPhone = trim((string) ($currentUserRow['phone'] ?? ''));
+    $newEmail = trim($newEmail);
+    $newPhone = trim($newPhone);
+
+    if ($emailChanged && $newEmail !== '') {
+        return [
+            'ok' => true,
+            'channel' => 'email',
+            'email' => $newEmail,
+            'phone' => $newPhone,
+            'masked' => patient_profile_mask_email($newEmail),
+        ];
+    }
+
+    if (filter_var($currentEmail, FILTER_VALIDATE_EMAIL)) {
+        return [
+            'ok' => true,
+            'channel' => 'email',
+            'email' => $currentEmail,
+            'phone' => $currentPhone,
+            'masked' => patient_profile_mask_email($currentEmail),
+        ];
+    }
+
+    $phoneForSms = clinic_sms_normalize_phone($currentPhone) !== null ? $currentPhone : $newPhone;
+    if (clinic_sms_normalize_phone($phoneForSms) !== null) {
+        return [
+            'ok' => true,
+            'channel' => 'sms',
+            'email' => '',
+            'phone' => $phoneForSms,
+            'masked' => patient_profile_mask_phone($phoneForSms),
+        ];
+    }
+
+    return ['ok' => false, 'error' => 'Add a valid email address or Philippine mobile number before changing your email or password.'];
+}
+
+function patient_profile_email_is_taken(mysqli $conn, int $patientId, string $email): bool {
+    $email = trim(strtolower($email));
+    if ($email === '') {
+        return false;
+    }
+    $stmt = $conn->prepare("SELECT id FROM users WHERE LOWER(email) = ? AND id <> ? LIMIT 1");
+    $stmt->bind_param('si', $email, $patientId);
+    $stmt->execute();
+    $exists = (bool) $stmt->get_result()->fetch_assoc();
+    $stmt->close();
+    return $exists;
+}
+
+function patient_profile_send_sensitive_code(array $delivery, string $name, array $payload): array {
+    $code = (string) random_int(100000, 999999);
+    $sent = clinic_send_verification_code(
+        (string) $delivery['channel'],
+        (string) ($delivery['email'] ?? ''),
+        (string) ($delivery['phone'] ?? ''),
+        $name,
+        $code,
+        'profile_update'
+    );
+    if (empty($sent['ok'])) {
+        return ['ok' => false, 'error' => $sent['error'] ?? 'Could not send the verification code.'];
+    }
+
+    $_SESSION[PATIENT_PROFILE_VERIFY_SESSION] = [
+        'user_id' => (int) ($_SESSION['user_id'] ?? 0),
+        'payload' => $payload,
+        'code_hash' => password_hash($code, PASSWORD_DEFAULT),
+        'expires_at' => time() + 600,
+        'attempts' => 0,
+        'channel' => (string) $delivery['channel'],
+        'email' => (string) ($delivery['email'] ?? ''),
+        'phone' => (string) ($delivery['phone'] ?? ''),
+        'masked' => (string) ($delivery['masked'] ?? ''),
+    ];
+
+    return ['ok' => true, 'masked' => (string) ($delivery['masked'] ?? '')];
+}
+
+function patient_profile_apply_sensitive_changes(mysqli $conn, int $patientId, array $payload): array {
+    if (array_key_exists('email', $payload)) {
+        $email = trim((string) $payload['email']);
+        if ($email !== '' && !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            return ['ok' => false, 'error' => 'The pending email address is invalid.'];
+        }
+        if (patient_profile_email_is_taken($conn, $patientId, $email)) {
+            return ['ok' => false, 'error' => 'That email address is already used by another account.'];
+        }
+        $stmt = $conn->prepare("UPDATE users SET email = ?, profile_updated_at = NOW() WHERE id = ? AND role = 'patient'");
+        $stmt->bind_param('si', $email, $patientId);
+        if (!$stmt->execute()) {
+            $stmt->close();
+            return ['ok' => false, 'error' => 'Could not update the email address.'];
+        }
+        $stmt->close();
+    }
+
+    if (!empty($payload['password_hash'])) {
+        $stmt = $conn->prepare("UPDATE users SET password = ? WHERE id = ? AND role = 'patient'");
+        $stmt->bind_param('si', $payload['password_hash'], $patientId);
+        if (!$stmt->execute()) {
+            $stmt->close();
+            return ['ok' => false, 'error' => 'Could not update the password.'];
+        }
+        $stmt->close();
+    }
+
+    return ['ok' => true, 'error' => ''];
+}
 
 $pageTitle = "Patient Dashboard | Globalife Medical Laboratory & Polyclinic";
 $currentUser = getCurrentUser();
@@ -46,6 +193,81 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['patient_action'] ?? '') ==
     exit();
 }
 
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['profile_verify_submit'])) {
+    $verifyAction = (string) ($_POST['profile_verify_submit'] ?? 'verify');
+    $pending = patient_profile_pending_change();
+
+    if ($verifyAction === 'cancel') {
+        unset($_SESSION[PATIENT_PROFILE_VERIFY_SESSION]);
+        $_SESSION['patient_profile_message'] = 'Pending email or password change cancelled.';
+        $conn->close();
+        header('Location: patients.php?profile=1');
+        exit;
+    }
+
+    if (!$pending || (int) ($pending['user_id'] ?? 0) !== (int) $currentUser['id']) {
+        unset($_SESSION[PATIENT_PROFILE_VERIFY_SESSION]);
+        $_SESSION['patient_profile_error'] = 'No active verification request was found. Please save your profile again.';
+        $conn->close();
+        header('Location: patients.php?profile=1');
+        exit;
+    }
+
+    if ($verifyAction === 'resend') {
+        $delivery = [
+            'channel' => (string) ($pending['channel'] ?? 'email'),
+            'email' => (string) ($pending['email'] ?? ''),
+            'phone' => (string) ($pending['phone'] ?? ''),
+            'masked' => (string) ($pending['masked'] ?? ''),
+        ];
+        $sent = patient_profile_send_sensitive_code($delivery, (string) $currentUser['full_name'], (array) ($pending['payload'] ?? []));
+        $_SESSION[$sent['ok'] ? 'patient_profile_message' : 'patient_profile_error'] = $sent['ok']
+            ? 'A new verification code was sent to ' . ($sent['masked'] ?: 'your contact') . '.'
+            : ($sent['error'] ?? 'Could not resend the verification code.');
+        $conn->close();
+        header('Location: patients.php?profile=verify');
+        exit;
+    }
+
+    $code = preg_replace('/\D+/', '', (string) ($_POST['profile_verification_code'] ?? ''));
+    if (!preg_match('/^\d{6}$/', $code)) {
+        $_SESSION['patient_profile_error'] = 'Enter the complete 6-digit verification code.';
+        $conn->close();
+        header('Location: patients.php?profile=verify');
+        exit;
+    }
+
+    if ((int) ($pending['attempts'] ?? 0) >= 5) {
+        unset($_SESSION[PATIENT_PROFILE_VERIFY_SESSION]);
+        $_SESSION['patient_profile_error'] = 'Too many incorrect attempts. Please save your profile again to request a new code.';
+        $conn->close();
+        header('Location: patients.php?profile=1');
+        exit;
+    }
+
+    if (!password_verify($code, (string) ($pending['code_hash'] ?? ''))) {
+        $_SESSION[PATIENT_PROFILE_VERIFY_SESSION]['attempts'] = (int) ($pending['attempts'] ?? 0) + 1;
+        $_SESSION['patient_profile_error'] = 'Incorrect verification code. Please check the latest code sent to ' . ((string) ($pending['masked'] ?? 'your contact')) . '.';
+        $conn->close();
+        header('Location: patients.php?profile=verify');
+        exit;
+    }
+
+    $applied = patient_profile_apply_sensitive_changes($conn, (int) $currentUser['id'], (array) ($pending['payload'] ?? []));
+    if (!$applied['ok']) {
+        $_SESSION['patient_profile_error'] = $applied['error'] ?? 'Could not finish the verified profile change.';
+        $conn->close();
+        header('Location: patients.php?profile=verify');
+        exit;
+    }
+
+    unset($_SESSION[PATIENT_PROFILE_VERIFY_SESSION]);
+    $_SESSION['patient_profile_message'] = 'Verified. Your email or password change has been completed.';
+    $conn->close();
+    header('Location: patients.php?saved=1');
+    exit;
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['profile_action'] ?? '') === 'update_profile') {
     $fullName = trim($_POST['full_name'] ?? '');
     $email = trim($_POST['email'] ?? '');
@@ -63,9 +285,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['profile_action'] ?? '') ==
     $newPassword = $_POST['new_password'] ?? '';
     $confirmNewPassword = $_POST['confirm_new_password'] ?? '';
     $allowedGenders = ['', 'Male', 'Female', 'Other'];
+    $fullNameLength = function_exists('mb_strlen') ? mb_strlen($fullName) : strlen($fullName);
     $computedAge = '';
     $parsedBirthDate = null;
     $birthDateIsValid = true;
+    $currentProfileStmt = $conn->prepare('SELECT email, phone, password, profile_photo FROM users WHERE id = ? AND role = ? LIMIT 1');
+    $patientRole = 'patient';
+    $currentProfileStmt->bind_param('is', $currentUser['id'], $patientRole);
+    $currentProfileStmt->execute();
+    $currentProfileRow = $currentProfileStmt->get_result()->fetch_assoc() ?: [];
+    $currentProfileStmt->close();
+    $currentEmail = trim((string) ($currentProfileRow['email'] ?? ''));
+    $currentPhone = trim((string) ($currentProfileRow['phone'] ?? ''));
+    $emailChanged = strtolower($email) !== strtolower($currentEmail);
+    $passwordChangeRequested = $newPassword !== '' || $confirmNewPassword !== '' || $currentPassword !== '';
+    $pendingSensitivePayload = [];
 
     if ($dateOfBirth !== '') {
         $parsedBirthDate = DateTime::createFromFormat('!Y-m-d', $dateOfBirth);
@@ -77,8 +311,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['profile_action'] ?? '') ==
 
     if ($fullName === '') {
         $profileError = 'Full name is required.';
+    } elseif ($fullNameLength > PATIENT_PROFILE_NAME_MAX) {
+        $profileError = 'Full name must not exceed ' . PATIENT_PROFILE_NAME_MAX . ' characters.';
     } elseif ($email !== '' && !filter_var($email, FILTER_VALIDATE_EMAIL)) {
         $profileError = 'Please enter a valid email address.';
+    } elseif ($emailChanged && $email !== '' && patient_profile_email_is_taken($conn, (int) $currentUser['id'], $email)) {
+        $profileError = 'That email address is already used by another account.';
     } elseif (!in_array($gender, $allowedGenders, true)) {
         $profileError = 'Please choose a valid gender.';
     } elseif (!$birthDateIsValid) {
@@ -86,28 +324,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['profile_action'] ?? '') ==
     } elseif ($parsedBirthDate instanceof DateTime && $parsedBirthDate > new DateTime('today')) {
         $profileError = 'Date of birth cannot be in the future.';
     } else {
-        if ($newPassword !== '' || $confirmNewPassword !== '' || $currentPassword !== '') {
+        if ($passwordChangeRequested) {
             if ($newPassword === '' || $confirmNewPassword === '') {
                 $profileError = 'Enter and confirm your new password, or leave all password fields blank.';
             } elseif ($currentPassword === '') {
                 $profileError = 'Enter your current password to change it.';
             } elseif ($newPassword !== $confirmNewPassword) {
                 $profileError = 'New password and confirmation do not match.';
+            } elseif (empty($currentProfileRow['password']) || !password_verify($currentPassword, $currentProfileRow['password'])) {
+                $profileError = 'Current password is incorrect.';
             } else {
-                $pwStmt = $conn->prepare('SELECT password FROM users WHERE id = ?');
-                $pwStmt->bind_param('i', $currentUser['id']);
-                $pwStmt->execute();
-                $pwRow = $pwStmt->get_result()->fetch_assoc();
-                $pwStmt->close();
-                if (!$pwRow || !password_verify($currentPassword, $pwRow['password'])) {
-                    $profileError = 'Current password is incorrect.';
-                } else {
-                    $passwordErrors = pw_reset_validate_password($newPassword);
-                    if ($passwordErrors !== []) {
-                        $profileError = implode(' ', $passwordErrors);
-                    }
+                $passwordErrors = pw_reset_validate_password($newPassword);
+                if ($passwordErrors !== []) {
+                    $profileError = implode(' ', $passwordErrors);
                 }
             }
+        }
+
+        if ($profileError === '' && $emailChanged) {
+            $pendingSensitivePayload['email'] = $email;
+        }
+        if ($profileError === '' && $passwordChangeRequested) {
+            $pendingSensitivePayload['password_hash'] = password_hash($newPassword, PASSWORD_DEFAULT);
         }
 
         if ($profileError === '') {
@@ -116,12 +354,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['profile_action'] ?? '') ==
                 $computedAge = (string) $parsedBirthDate->diff($todayDate)->y;
             }
 
-        $photoStmt = $conn->prepare('SELECT profile_photo FROM users WHERE id = ?');
-        $photoStmt->bind_param('i', $currentUser['id']);
-        $photoStmt->execute();
-        $photoRow = $photoStmt->get_result()->fetch_assoc();
-        $photoStmt->close();
-        $currentPhotoPath = $photoRow['profile_photo'] ?? null;
+        $currentPhotoPath = $currentProfileRow['profile_photo'] ?? null;
 
         $removePhoto = ($_POST['remove_profile_photo'] ?? '') === '1';
         $croppedPhoto = trim($_POST['profile_photo_cropped'] ?? '');
@@ -142,7 +375,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['profile_action'] ?? '') ==
         if ($profileError === '') {
             $result = updatePatientUserProfile($conn, (int) $currentUser['id'], [
                 'full_name' => $fullName,
-                'email' => $email,
+                'email' => array_key_exists('email', $pendingSensitivePayload) ? $currentEmail : $email,
                 'phone' => $phone,
                 'gender' => $gender,
                 'date_of_birth' => $dateOfBirth,
@@ -156,22 +389,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['profile_action'] ?? '') ==
                 'emergency_contact_number' => $emergencyNumber,
             ], $newPhotoPath, $removePhoto);
 
-            if ($result['ok'] && $newPassword !== '') {
-                $passwordHash = password_hash($newPassword, PASSWORD_DEFAULT);
-                $pwUpdate = $conn->prepare('UPDATE users SET password = ? WHERE id = ? AND role = ?');
-                $patientRole = 'patient';
-                $pwUpdate->bind_param('sis', $passwordHash, $currentUser['id'], $patientRole);
-                if (!$pwUpdate->execute() || $pwUpdate->affected_rows === 0) {
-                    $profileError = 'Profile saved but password could not be updated. Please try again.';
-                }
-                $pwUpdate->close();
-            }
-
             if ($result['ok'] && $profileError === '') {
                 $_SESSION['full_name'] = $fullName;
-                $_SESSION['patient_profile_message'] = $newPassword !== ''
-                    ? 'Profile and password updated successfully.'
-                    : 'Profile updated successfully.';
+                if ($pendingSensitivePayload !== []) {
+                    $delivery = patient_profile_sensitive_delivery($currentProfileRow, $email, $phone, array_key_exists('email', $pendingSensitivePayload));
+                    if (empty($delivery['ok'])) {
+                        $_SESSION['patient_profile_error'] = $delivery['error'] ?? 'Could not prepare profile verification.';
+                        $conn->close();
+                        header('Location: patients.php?profile=1');
+                        exit;
+                    }
+                    $sent = patient_profile_send_sensitive_code($delivery, $fullName, $pendingSensitivePayload);
+                    if (empty($sent['ok'])) {
+                        $_SESSION['patient_profile_error'] = 'Profile details were saved, but the verification code could not be sent. ' . ($sent['error'] ?? 'Please try again.');
+                        $conn->close();
+                        header('Location: patients.php?profile=1');
+                        exit;
+                    }
+                    $_SESSION['patient_profile_message'] = 'Profile details saved. Enter the verification code sent to ' . ($sent['masked'] ?: 'your contact') . ' to finish the email or password change.';
+                    $conn->close();
+                    header('Location: patients.php?profile=verify');
+                    exit;
+                }
+
+                unset($_SESSION[PATIENT_PROFILE_VERIFY_SESSION]);
+                $_SESSION['patient_profile_message'] = 'Profile updated successfully.';
                 $conn->close();
                 header('Location: patients.php?saved=1');
                 exit;
@@ -199,6 +441,7 @@ if (!empty($_SESSION['patient_profile_error'])) {
     $profileError = (string) $_SESSION['patient_profile_error'];
     unset($_SESSION['patient_profile_error']);
 }
+$pendingProfileChange = patient_profile_pending_change();
 
 $stmt = $conn->prepare("SELECT * FROM users WHERE id = ?");
 $stmt->bind_param("i", $currentUser['id']);
@@ -282,7 +525,7 @@ $headerPatientInitials = $profileInitials;
 $headerPatientDisplayName = $userDetails['full_name'] ?? $currentUser['full_name'];
 $showProfileSuccessPopup = $profileMessage !== '';
 $showProfileErrorPopup = $profileError !== '';
-$openProfileModal = $showProfileErrorPopup || (isset($_GET['profile']) && $_GET['profile'] === '1' && !$showProfileSuccessPopup);
+$openProfileModal = $showProfileErrorPopup || $pendingProfileChange !== null || (isset($_GET['profile']) && in_array($_GET['profile'], ['1', 'verify'], true) && !$showProfileSuccessPopup);
 $upcomingCount = (int) ($summary['upcoming_count'] ?? 0);
 $completedCount = (int) ($summary['completed_count'] ?? 0);
 $totalCount = (int) ($summary['total_count'] ?? 0);
@@ -918,6 +1161,53 @@ $additionalStyles = '
         background: #fff0f0;
         color: #9d1c2c;
         border: 1px solid #ffd0d5;
+    }
+
+    .profile-verify-panel {
+        border: 1px solid #b9ddf4;
+        background: #f1f9ff;
+        border-radius: 10px;
+        padding: 14px;
+        margin-bottom: 16px;
+        display: grid;
+        gap: 10px;
+    }
+
+    .profile-verify-panel h4 {
+        margin: 0;
+        color: #073b4c;
+        font-size: 1rem;
+    }
+
+    .profile-verify-panel p {
+        margin: 0;
+        color: #526b78;
+        line-height: 1.45;
+    }
+
+    .profile-verify-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
+    }
+
+    .profile-verify-actions input {
+        flex: 1 1 180px;
+        min-height: 42px;
+        border: 1px solid #cfe2f2;
+        border-radius: 8px;
+        padding: 10px 12px;
+        font: inherit;
+        font-weight: 800;
+        letter-spacing: 4px;
+        text-align: center;
+    }
+
+    .field-hint {
+        color: #6b7e89;
+        font-size: .82rem;
+        font-weight: 700;
     }
 
     .profile-form {
@@ -2070,6 +2360,19 @@ include 'includes/header.php';
                 <input type="hidden" name="profile_action" value="update_profile">
                 <input type="hidden" name="profile_photo_cropped" id="profile_photo_cropped" value="">
 
+                <?php if ($pendingProfileChange): ?>
+                    <div class="profile-verify-panel">
+                        <h4>Verify email or password change</h4>
+                        <p>Enter the 6-digit code sent to <strong><?php echo htmlspecialchars((string) ($pendingProfileChange['masked'] ?? 'your contact')); ?></strong>. Your other profile details are saved, but email/password changes need this final check.</p>
+                        <div class="profile-verify-actions">
+                            <input type="text" name="profile_verification_code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" placeholder="000000" aria-label="Profile verification code">
+                            <button type="submit" name="profile_verify_submit" value="verify" class="primary-btn" formnovalidate>Verify</button>
+                            <button type="submit" name="profile_verify_submit" value="resend" class="plain-btn" formnovalidate>Resend</button>
+                            <button type="submit" name="profile_verify_submit" value="cancel" class="plain-btn" formnovalidate>Cancel change</button>
+                        </div>
+                    </div>
+                <?php endif; ?>
+
                 <div class="photo-editor-panel">
                     <h4>Profile picture</h4>
                     <p class="photo-help-text">Add or change your picture, then crop and zoom it before saving.</p>
@@ -2120,7 +2423,8 @@ include 'includes/header.php';
                         <div class="profile-form-grid">
                             <div class="profile-field full">
                                 <label for="modal_full_name">Full name</label>
-                                <input type="text" id="modal_full_name" name="full_name" value="<?php echo htmlspecialchars($userDetails['full_name'] ?? $currentUser['full_name']); ?>" required>
+                                <input type="text" id="modal_full_name" name="full_name" maxlength="<?php echo PATIENT_PROFILE_NAME_MAX; ?>" value="<?php echo htmlspecialchars($userDetails['full_name'] ?? $currentUser['full_name']); ?>" required>
+                                <span class="field-hint">Maximum of <?php echo PATIENT_PROFILE_NAME_MAX; ?> characters. <span id="modalFullNameCounter">0/<?php echo PATIENT_PROFILE_NAME_MAX; ?></span></span>
                             </div>
                             <div class="profile-field">
                                 <label for="modal_email">Email</label>
@@ -2271,9 +2575,21 @@ include 'includes/header.php';
         const photoZoomControl = document.getElementById('photoZoomControl');
         const photoZoomRange = document.getElementById('photoZoomRange');
         const photoZoomValue = document.getElementById('photoZoomValue');
+        const modalFullNameInput = document.getElementById('modal_full_name');
+        const modalFullNameCounter = document.getElementById('modalFullNameCounter');
         let cropper = null;
         let pendingCrop = false;
         let zoomLevel = 0;
+
+        function updateModalFullNameCounter() {
+            if (!modalFullNameInput || !modalFullNameCounter) return;
+            modalFullNameCounter.textContent = modalFullNameInput.value.length + '/<?php echo PATIENT_PROFILE_NAME_MAX; ?>';
+        }
+
+        if (modalFullNameInput) {
+            modalFullNameInput.addEventListener('input', updateModalFullNameCounter);
+            updateModalFullNameCounter();
+        }
 
         function openProfileModal() {
             modal.classList.add('active');

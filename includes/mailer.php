@@ -299,6 +299,9 @@ function clinic_send_otp_email(string $email, string $name, string $code, string
     } elseif ($purpose === 'appointment') {
         $title = 'Confirm your Globalife appointment request';
         $instruction = 'Enter this code on the appointment verification page to confirm that this booking request is yours.';
+    } elseif ($purpose === 'profile_update') {
+        $title = 'Confirm your Globalife profile change';
+        $instruction = 'Enter this code on your profile page to finish changing your email or password.';
     } else {
         $title = 'Reset your Globalife password';
         $instruction = 'Enter this code on the Forgot Password page to create a new password.';

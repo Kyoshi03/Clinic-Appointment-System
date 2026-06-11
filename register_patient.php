@@ -1533,7 +1533,7 @@ $additionalStyles = '
                 </div>
                 
                 <button type="submit" class="login-btn-form" id="submitRegisterBtn">
-                    <span>Continue and Verify Email</span>
+                    <span>Continue and Verify</span>
                 </button>
             </form>
             

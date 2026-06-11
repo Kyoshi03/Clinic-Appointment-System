@@ -213,6 +213,10 @@ function updatePatientUserProfile(mysqli $conn, int $patientId, array $fields, ?
         return ['ok' => false, 'error' => 'Could not prepare profile update.'];
     }
     $fullName = (string) ($fields['full_name'] ?? '');
+    $fullNameLength = function_exists('mb_strlen') ? mb_strlen($fullName) : strlen($fullName);
+    if ($fullNameLength > 40) {
+        return ['ok' => false, 'error' => 'Full name must not exceed 40 characters.'];
+    }
     $email = (string) ($fields['email'] ?? '');
     $phone = (string) ($fields['phone'] ?? '');
     $gender = (string) ($fields['gender'] ?? '');
