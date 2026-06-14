@@ -70,6 +70,10 @@ $updateStmt->bind_param("si", $new_status, $appointment_id);
 
 if ($updateStmt->execute()) {
     $_SESSION['success'] = 'Appointment status updated successfully.';
+    if ($new_status !== $appointment['status']) {
+        create_patient_appointment_notification($conn, (int) $appointment_id, $new_status);
+        create_clinic_appointment_notification($conn, (int) $appointment_id, $new_status);
+    }
     if ($new_status === 'confirmed' && $appointment['status'] !== 'confirmed') {
         $emailResult = appointment_send_clinic_confirmation_email($conn, (int) $appointment_id);
         $smsResult = appointment_send_clinic_confirmation_sms($conn, (int) $appointment_id);
@@ -95,8 +99,6 @@ $conn->close();
 
 header('Location: view_appointments.php');
 exit();
-
-
 
 
 

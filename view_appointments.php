@@ -418,13 +418,15 @@ $additionalStyles = patientAvatarStyles() . '
     }
     .appointment-row { cursor: pointer; }
     .appointment-row:focus { outline: 3px solid rgba(0,119,182,.25); outline-offset: -3px; }
+    .appointment-row.is-highlighted { outline: 3px solid rgba(72, 202, 228, .45); outline-offset: -3px; background: #f0fbff; }
     .appointment-modal { position: fixed; inset: 0; z-index: 3000; display: none; align-items: center; justify-content: center; padding: 18px; background: rgba(3, 18, 30, .55); }
     .appointment-modal.is-open { display: flex; }
-    .appointment-modal-card { width: min(680px, 100%); background: #fff; border-radius: 14px; box-shadow: 0 18px 55px rgba(0,0,0,.24); overflow: hidden; }
-    .appointment-modal-head { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; padding: 20px 22px; background: #f1f8fd; border-bottom: 1px solid #dce9f4; }
-    .appointment-modal-head h3 { margin: 0; color: #023e8a; font-size: 1.2rem; }
-    .appointment-modal-head p { margin: 4px 0 0; color: #526b7c; font-size: .92rem; }
-    .modal-close { border: 0; background: #fff; color: #023e8a; width: 34px; height: 34px; border-radius: 8px; cursor: pointer; font-size: 1.35rem; line-height: 1; }
+    .appointment-modal-card { width: min(680px, 100%); background: #fff; border-radius: 18px; box-shadow: 0 22px 60px rgba(2,62,138,.22); overflow: hidden; border: 1px solid rgba(202,240,248,.45); }
+    .appointment-modal-head { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; padding: 22px 24px; background: linear-gradient(135deg, #0077b6 0%, #023e8a 100%); border-bottom: 1px solid #dce9f4; color: #fff; }
+    .appointment-modal-head h3 { margin: 0; color: #fff; font-size: 1.22rem; }
+    .appointment-modal-head p { margin: 4px 0 0; color: rgba(255,255,255,.82); font-size: .92rem; }
+    .modal-close { border: 0; background: rgba(255,255,255,.16); color: #fff; width: 36px; height: 36px; border-radius: 10px; cursor: pointer; font-size: 1.35rem; line-height: 1; }
+    .modal-close:hover { background: rgba(255,255,255,.26); }
     .appointment-modal-body { padding: 20px 22px; }
     .detail-summary-strip { display:grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 10px; margin-bottom: 18px; }
     .detail-pill { background:#f8fcfd; border:1px solid #dceef2; border-radius:12px; padding:12px; }
@@ -746,6 +748,7 @@ include 'includes/header.php';
                         ?>
                         <tr class="appointment-row" tabindex="0"
                             data-appointment='<?php echo htmlspecialchars(json_encode($detailPayload), ENT_QUOTES, 'UTF-8'); ?>'
+                            data-appointment-id="<?php echo (int) ($appointment['id'] ?? 0); ?>"
                             data-status="<?php echo htmlspecialchars($statusValue); ?>"
                             data-date="<?php echo htmlspecialchars((string) ($appointment['appointment_date'] ?? '')); ?>"
                             data-search="<?php echo htmlspecialchars($searchText, ENT_QUOTES); ?>">
@@ -999,6 +1002,19 @@ include 'includes/header.php';
             }
         });
     });
+    var highlightedAppointmentId = new URLSearchParams(window.location.search).get('highlight');
+    if (highlightedAppointmentId) {
+        var highlightedRow = rows.find(function(row) {
+            return row.getAttribute('data-appointment-id') === highlightedAppointmentId;
+        });
+        if (highlightedRow) {
+            highlightedRow.scrollIntoView({ block: 'center', behavior: 'smooth' });
+            highlightedRow.classList.add('is-highlighted');
+            window.setTimeout(function() {
+                showDetails(highlightedRow);
+            }, 250);
+        }
+    }
     document.querySelectorAll('button[data-confirm-message]').forEach(function(button) {
         button.addEventListener('click', function(event) {
             event.preventDefault();

@@ -66,10 +66,12 @@ $message = $_SESSION['success'] ?? '';
 $error = $_SESSION['error'] ?? '';
 unset($_SESSION['success'], $_SESSION['error']);
 
+$showAdminNotificationsPage = isset($_GET['notifications']) && $_GET['notifications'] === '1';
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['mark_admin_notifications_read'])) {
-    $conn->query('UPDATE admin_notifications SET read_at = NOW() WHERE read_at IS NULL');
+    mark_admin_notifications_read($conn);
     $_SESSION['success'] = 'Notifications marked as read.';
-    header('Location: admin.php');
+    header('Location: ' . ($showAdminNotificationsPage ? 'admin.php?notifications=1' : 'admin.php'));
     exit();
 }
 
@@ -168,17 +170,8 @@ $individualTests = admin_count_query($conn, 'SELECT COUNT(*) AS total FROM lab_s
 $medicalRecordCount = admin_count_query($conn, 'SELECT COUNT(*) AS total FROM medical_records');
 $labResultCount = admin_count_query($conn, 'SELECT COUNT(*) AS total FROM lab_result_entries');
 
-$adminNotifications = [];
-$notificationResult = $conn->query(
-    "SELECT id, notification_type, title, message, related_user_id, created_at, read_at
-     FROM admin_notifications
-     ORDER BY created_at DESC
-     LIMIT 8"
-);
-if ($notificationResult) {
-    $adminNotifications = $notificationResult->fetch_all(MYSQLI_ASSOC);
-}
-$unreadNotificationCount = admin_count_query($conn, 'SELECT COUNT(*) AS total FROM admin_notifications WHERE read_at IS NULL');
+$adminNotifications = fetch_admin_notifications($conn, $showAdminNotificationsPage ? 50 : 8);
+$unreadNotificationCount = count_unread_admin_notifications($conn);
 
 $conn->close();
 
@@ -355,6 +348,148 @@ body {
     color: #71838d;
     font-size: 0.8rem;
     font-weight: 700;
+}
+
+.admin-notifications-page {
+    display: grid;
+    gap: 16px;
+}
+
+.admin-notifications-hero {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    border: 1px solid #d7eaf4;
+    border-radius: 8px;
+    padding: 24px;
+    background:
+        radial-gradient(circle at 92% 18%, rgba(72, 202, 228, 0.22), transparent 30%),
+        linear-gradient(135deg, #ffffff 0%, #eefaff 100%);
+    box-shadow: 0 16px 34px rgba(25, 76, 110, 0.08);
+}
+
+.admin-notifications-kicker {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    color: #0077b6;
+    font-size: 0.86rem;
+    font-weight: 950;
+    text-transform: uppercase;
+}
+
+.admin-notifications-hero h1 {
+    margin: 8px 0 6px;
+    color: #073b4c;
+    font-size: 2rem;
+    line-height: 1.12;
+}
+
+.admin-notifications-hero p {
+    margin: 0;
+    color: #58707d;
+    line-height: 1.55;
+}
+
+.admin-unread-pill {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 120px;
+    min-height: 46px;
+    border-radius: 999px;
+    background: #eaf8ff;
+    color: #0077b6;
+    font-weight: 950;
+}
+
+.admin-notification-feed {
+    display: grid;
+    gap: 12px;
+}
+
+.admin-notification-card {
+    display: grid;
+    grid-template-columns: 46px minmax(0, 1fr) auto;
+    gap: 14px;
+    align-items: center;
+    border: 1px solid #dce8ef;
+    border-radius: 8px;
+    padding: 16px;
+    background: #ffffff;
+    box-shadow: 0 10px 24px rgba(25, 76, 110, 0.05);
+}
+
+.admin-notification-card.unread {
+    border-color: #8ed9ef;
+    background: #f2fbff;
+}
+
+.admin-notification-icon {
+    width: 46px;
+    height: 46px;
+    display: grid;
+    place-items: center;
+    border-radius: 14px;
+    background: #e7f7ed;
+    color: #17643a;
+}
+
+.admin-notification-icon svg {
+    width: 22px;
+    height: 22px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2.2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+.admin-notification-card h3 {
+    margin: 0;
+    color: #073b4c;
+    font-size: 1.02rem;
+}
+
+.admin-notification-card p {
+    margin: 5px 0 8px;
+    color: #58707d;
+    line-height: 1.45;
+}
+
+.admin-notification-meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    color: #71838d;
+    font-size: 0.84rem;
+    font-weight: 800;
+}
+
+.admin-notification-status {
+    display: inline-flex;
+    border-radius: 999px;
+    padding: 4px 9px;
+    background: #eaf8ff;
+    color: #0077b6;
+    font-size: 0.72rem;
+    font-weight: 950;
+    text-transform: uppercase;
+}
+
+.admin-notification-open {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 40px;
+    border-radius: 8px;
+    padding: 0 14px;
+    background: #eef8ff;
+    color: #0b4f80;
+    font-weight: 950;
+    text-decoration: none;
 }
 
 .metrics-grid {
@@ -607,6 +742,20 @@ body {
         padding: 18px 12px 36px;
     }
 
+    .admin-notifications-hero,
+    .admin-notification-card {
+        grid-template-columns: 1fr;
+    }
+
+    .admin-notifications-hero {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .admin-notification-open {
+        width: 100%;
+    }
+
     .admin-hero,
     .main-grid,
     .metrics-grid,
@@ -645,6 +794,66 @@ include 'includes/header.php';
     <?php endif; ?>
     <?php if ($error): ?>
         <div class="message error"><?php echo htmlspecialchars($error); ?></div>
+    <?php endif; ?>
+
+    <?php if ($showAdminNotificationsPage): ?>
+        <section class="admin-notifications-page" aria-labelledby="adminNotificationsTitle">
+            <div class="admin-notifications-hero">
+                <div>
+                    <span class="admin-notifications-kicker">
+                        <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 7h18s-3 0-3-7M10 20a2 2 0 0 0 4 0" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                        Admin notifications
+                    </span>
+                    <h1 id="adminNotificationsTitle">Account and system notifications</h1>
+                    <p>New patient accounts, reception desk QR registrations, and important admin updates appear here.</p>
+                </div>
+                <div class="admin-notifications-actions">
+                    <span class="admin-unread-pill"><?php echo (int) $unreadNotificationCount; ?> unread</span>
+                    <?php if ($unreadNotificationCount > 0): ?>
+                        <form method="post">
+                            <button class="btn secondary" type="submit" name="mark_admin_notifications_read" value="1">Mark all as read</button>
+                        </form>
+                    <?php endif; ?>
+                </div>
+            </div>
+
+            <?php if (empty($adminNotifications)): ?>
+                <div class="empty-state">No admin notifications yet.</div>
+            <?php else: ?>
+                <div class="admin-notification-feed">
+                    <?php foreach ($adminNotifications as $notification): ?>
+                        <?php
+                        $notificationId = (int) ($notification['id'] ?? 0);
+                        $notificationType = strtolower((string) ($notification['notification_type'] ?? ''));
+                        $notificationTime = strtotime((string) ($notification['created_at'] ?? ''));
+                        $notificationDate = $notificationTime ? date('M d, Y g:i A', $notificationTime) : '';
+                        $isUnread = empty($notification['read_at']);
+                        $statusLabel = str_replace('_', ' ', $notificationType !== '' ? $notificationType : 'admin update');
+                        ?>
+                        <article id="notification-<?php echo $notificationId; ?>" class="admin-notification-card <?php echo $isUnread ? 'unread' : ''; ?>">
+                            <span class="admin-notification-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2"/><path d="M9.5 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z"/><path d="M19 8v6M22 11h-6"/></svg>
+                            </span>
+                            <div>
+                                <h3><?php echo htmlspecialchars((string) ($notification['title'] ?? 'Admin notification')); ?></h3>
+                                <p><?php echo htmlspecialchars((string) ($notification['message'] ?? '')); ?></p>
+                                <span class="admin-notification-meta">
+                                    <?php if ($notificationDate !== ''): ?>
+                                        <span><?php echo htmlspecialchars($notificationDate); ?></span>
+                                    <?php endif; ?>
+                                    <span class="admin-notification-status"><?php echo htmlspecialchars($statusLabel); ?></span>
+                                    <span><?php echo $isUnread ? 'Unread' : 'Read'; ?></span>
+                                </span>
+                            </div>
+                            <a class="admin-notification-open" href="admin_accounts.php">Open Accounts</a>
+                        </article>
+                    <?php endforeach; ?>
+                </div>
+            <?php endif; ?>
+        </section>
+    </main>
+    <?php include 'includes/footer.php'; ?>
+    <?php exit; ?>
     <?php endif; ?>
 
     <section class="panel notification-panel">

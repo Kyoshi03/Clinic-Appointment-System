@@ -32,3 +32,28 @@ function create_admin_notification(
     return $saved;
 }
 
+function fetch_admin_notifications(mysqli $conn, int $limit = 8): array {
+    init_admin_notifications($conn);
+    $limit = max(1, min(50, $limit));
+    $result = $conn->query(
+        "SELECT id, notification_type, title, message, related_user_id, created_at, read_at
+         FROM admin_notifications
+         ORDER BY created_at DESC, id DESC
+         LIMIT {$limit}"
+    );
+    return $result ? $result->fetch_all(MYSQLI_ASSOC) : [];
+}
+
+function count_unread_admin_notifications(mysqli $conn): int {
+    init_admin_notifications($conn);
+    $result = $conn->query('SELECT COUNT(*) AS total FROM admin_notifications WHERE read_at IS NULL');
+    if ($result && ($row = $result->fetch_assoc())) {
+        return (int) ($row['total'] ?? 0);
+    }
+    return 0;
+}
+
+function mark_admin_notifications_read(mysqli $conn): bool {
+    init_admin_notifications($conn);
+    return (bool) $conn->query('UPDATE admin_notifications SET read_at = NOW() WHERE read_at IS NULL');
+}

@@ -4,6 +4,7 @@ checkRole('admin');
 
 require_once 'config/database.php';
 require_once __DIR__ . '/includes/patient_profile_photo.php';
+require_once __DIR__ . '/includes/admin_notifications.php';
 
 $pageTitle = 'Accounts | Globalife Administration';
 $conn = getDBConnection();
@@ -35,6 +36,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['account_action'] ?? '') ==
         );
         $stmt->bind_param('ssssss', $username, $hash, $fullName, $role, $email, $phone);
         if ($stmt->execute()) {
+            $newStaffId = (int) $stmt->insert_id;
+            create_admin_notification(
+                $conn,
+                'staff_account_created',
+                'New staff account',
+                $fullName . ' was added as ' . ucfirst($role) . '.',
+                $newStaffId
+            );
             $_SESSION['success'] = 'Staff account created successfully.';
         } else {
             $_SESSION['error'] = $conn->errno === 1062

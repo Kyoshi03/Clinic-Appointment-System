@@ -4,6 +4,8 @@ checkRole('nurse');
 
 require_once 'config/database.php';
 require_once __DIR__ . '/includes/patient_profile_photo.php';
+require_once __DIR__ . '/includes/patient_notifications.php';
+require_once __DIR__ . '/includes/clinic_notifications.php';
 
 $pageTitle = 'Nurse Dashboard | Globalife Medical Laboratory & Polyclinic';
 $currentUser = getCurrentUser();
@@ -22,6 +24,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['nurse_status_action']
 
         if ($stmt->execute() && $stmt->affected_rows > 0) {
             $_SESSION['success'] = 'Patient visit marked as completed.';
+            create_patient_appointment_notification($conn, $appointmentId, 'completed');
+            create_clinic_appointment_notification($conn, $appointmentId, 'completed');
         } else {
             $_SESSION['error'] = 'Unable to update appointment status.';
         }
@@ -1088,5 +1092,3 @@ include 'includes/header.php';
 
 </main>
 <?php include 'includes/footer.php'; ?>
-
-

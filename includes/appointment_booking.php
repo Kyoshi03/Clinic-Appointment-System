@@ -4,6 +4,8 @@ require_once __DIR__ . '/mailer.php';
 require_once __DIR__ . '/sms.php';
 require_once __DIR__ . '/doctor_schedule.php';
 require_once __DIR__ . '/lab_services_seed_data.php';
+require_once __DIR__ . '/patient_notifications.php';
+require_once __DIR__ . '/clinic_notifications.php';
 
 function appointment_mask_email(string $email): string {
     $email = trim($email);
@@ -718,6 +720,8 @@ function appointment_verify_and_create(mysqli $conn, int $patientId, int $verifi
     ];
     $emailResult = appointment_send_booking_email($details);
     $smsResult = appointment_send_booking_sms($details);
+    create_patient_appointment_notification($conn, $appointmentId, 'booked');
+    create_clinic_appointment_notification($conn, $appointmentId, 'booked');
 
     return [
         'ok' => true,

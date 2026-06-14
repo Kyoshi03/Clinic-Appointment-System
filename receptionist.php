@@ -30,6 +30,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_status'])) {
 
         if ($updateStmt->execute()) {
             $_SESSION['success'] = 'Appointment status updated.';
+            if ($newStatus !== $oldStatus) {
+                create_patient_appointment_notification($conn, $appointmentId, $newStatus);
+                create_clinic_appointment_notification($conn, $appointmentId, $newStatus);
+            }
             if ($newStatus === 'confirmed' && $oldStatus !== 'confirmed') {
                 $emailResult = appointment_send_clinic_confirmation_email($conn, $appointmentId);
                 if (!$emailResult['ok']) {

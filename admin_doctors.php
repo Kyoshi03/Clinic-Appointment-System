@@ -4,10 +4,12 @@ checkRole('admin');
 
 require_once 'config/database.php';
 require_once __DIR__ . '/includes/doctor_schedule.php';
+require_once __DIR__ . '/includes/admin_notifications.php';
 
 $pageTitle = 'Doctors & clinic hours | Globalife';
 $conn = getDBConnection();
 init_doctor_schema_and_accounts($conn);
+init_admin_notifications($conn);
 
 $message = '';
 $error = '';
@@ -304,6 +306,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $stmt->close();
 
                 admin_doctor_save_slots($conn, $newId, $parsed['slots']);
+                create_admin_notification(
+                    $conn,
+                    'doctor_account_created',
+                    'New doctor account',
+                    $name . ' was added to Doctors & Hours.',
+                    $newId
+                );
                 $conn->commit();
                 $message = 'Doctor account and schedule created. Username: ' . $username . ' | Default password: ' . $defaultDoctorPassword;
             } catch (Throwable $e) {

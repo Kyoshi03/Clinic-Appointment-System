@@ -3,6 +3,7 @@ require_once 'includes/session.php';
 checkRole('receptionist');
 
 require_once 'config/database.php';
+require_once __DIR__ . '/includes/admin_notifications.php';
 
 $currentUser = getCurrentUser();
 $error = '';
@@ -104,6 +105,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $stmt->bind_param("ssssssssisssssss", $username, $hashed_password, $full_name, $role, $email, $phone, $gender, $date_of_birth, $age, $civil_status, $address, $barangay, $city, $emergency_contact_name, $emergency_contact_relationship, $emergency_contact_number);
             
             if ($stmt->execute()) {
+                $newPatientId = (int) $stmt->insert_id;
+                create_admin_notification(
+                    $conn,
+                    'patient_account_created',
+                    'New patient account',
+                    $full_name . ' was registered by the reception desk.',
+                    $newPatientId
+                );
                 $success = 'Patient registered successfully!';
                 // Clear form data on success
                 $_POST = array();

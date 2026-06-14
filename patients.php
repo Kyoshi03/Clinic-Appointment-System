@@ -7,6 +7,7 @@ require_once 'includes/patient_profile_photo.php';
 require_once 'includes/nurse_medical_fields.php';
 require_once 'includes/password_reset.php';
 require_once 'includes/sms.php';
+require_once 'includes/patient_notifications.php';
 
 const PATIENT_PROFILE_NAME_MAX = 40;
 const PATIENT_PROFILE_VERIFY_SESSION = 'patient_profile_pending_change';
@@ -217,6 +218,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['patient_action'] ?? '') ==
     }
     $conn->close();
     header('Location: patients.php');
+    exit();
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['patient_action'] ?? '') === 'mark_notifications_read') {
+    mark_patient_notifications_read($conn, (int) $currentUser['id']);
+    header('Location: patients.php?notifications=1');
     exit();
 }
 
@@ -514,6 +521,8 @@ $stmt->close();
 
 $medicalRecords = [];
 $labResults = [];
+$patientNotifications = [];
+$patientUnreadNotificationCount = 0;
 $medicalRecordTotal = 0;
 $labResultTotal = 0;
 if (patient_table_exists($conn, 'medical_records')) {
@@ -554,6 +563,9 @@ if (patient_table_exists($conn, 'lab_result_entries')) {
     $stmt->close();
 }
 
+$patientNotifications = fetch_patient_notifications($conn, (int) $currentUser['id'], 20);
+$patientUnreadNotificationCount = count_unread_patient_notifications($conn, (int) $currentUser['id']);
+
 $conn->close();
 
 $firstName = trim(explode(' ', $currentUser['full_name'])[0] ?? 'Patient');
@@ -566,6 +578,7 @@ $showProfileSuccessPopup = $profileMessage !== '' && $pendingProfileChange === n
 $showProfileErrorPopup = $profileError !== '' && $pendingProfileChange === null;
 $showProfileVerificationPopup = $pendingProfileChange !== null;
 $openProfileModal = $showProfileErrorPopup || (isset($_GET['profile']) && $_GET['profile'] === '1' && !$showProfileSuccessPopup);
+$showNotificationsPage = isset($_GET['notifications']) && $_GET['notifications'] === '1';
 $upcomingCount = (int) ($summary['upcoming_count'] ?? 0);
 $completedCount = (int) ($summary['completed_count'] ?? 0);
 $totalCount = (int) ($summary['total_count'] ?? 0);
@@ -689,6 +702,26 @@ function patient_short_text(?string $text, int $limit = 90): string {
         return 'No details posted.';
     }
     return strlen($text) > $limit ? substr($text, 0, $limit) . '...' : $text;
+}
+
+function patient_notification_meta(array $notification): array {
+    $type = strtolower((string) ($notification['notification_type'] ?? ''));
+    if (strpos($type, 'confirmed') !== false || strpos($type, 'approved') !== false) {
+        return ['label' => 'Approved', 'class' => 'approved', 'icon' => 'M9 12l2 2 4-5M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z'];
+    }
+    if (strpos($type, 'cancelled') !== false) {
+        return ['label' => 'Cancelled', 'class' => 'cancelled', 'icon' => 'M18 6 6 18M6 6l12 12'];
+    }
+    if (strpos($type, 'completed') !== false) {
+        return ['label' => 'Completed', 'class' => 'completed', 'icon' => 'M9 12l2 2 4-5M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z'];
+    }
+    if (strpos($type, 'rescheduled') !== false) {
+        return ['label' => 'Rescheduled', 'class' => 'rescheduled', 'icon' => 'M21 12a9 9 0 1 1-3-6.7M21 3v6h-6'];
+    }
+    if (strpos($type, 'booked') !== false) {
+        return ['label' => 'Pending', 'class' => 'pending', 'icon' => 'M8 2v4M16 2v4M3 10h18 M5 4h14a2 2 0 0 1 2 2v14H3V6a2 2 0 0 1 2-2z'];
+    }
+    return ['label' => 'Update', 'class' => 'update', 'icon' => 'M8 2v4M16 2v4M3 10h18 M5 4h14a2 2 0 0 1 2 2v14H3V6a2 2 0 0 1 2-2z'];
 }
 
 $additionalStyles = '
@@ -1044,6 +1077,196 @@ $additionalStyles = '
         min-height: 40px;
         padding: 8px 14px;
         white-space: nowrap;
+    }
+
+    .patient-notifications-page {
+        max-width: 920px;
+        margin: 0 auto;
+    }
+
+    .patient-notifications-hero {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 18px;
+        padding: 24px 26px;
+        margin-bottom: 16px;
+        border: 1px solid #cde8f3;
+        border-radius: 18px;
+        background:
+            radial-gradient(circle at 88% 10%, rgba(72, 202, 228, 0.22), transparent 32%),
+            linear-gradient(135deg, #ffffff 0%, #f3fbff 100%);
+        box-shadow: 0 18px 42px rgba(2, 62, 138, 0.08);
+    }
+
+    .patient-notifications-kicker {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 9px;
+        color: #0077b6;
+        font-weight: 950;
+    }
+
+    .patient-notifications-kicker svg,
+    .patient-notification-card-icon svg {
+        width: 18px;
+        height: 18px;
+        fill: none;
+        stroke: currentColor;
+        stroke-width: 2.3;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+    }
+
+    .patient-notifications-hero h3 {
+        margin: 0;
+        color: #10233f;
+        font-size: 1.55rem;
+    }
+
+    .patient-notifications-hero p {
+        margin: 8px 0 0;
+        color: #60727d;
+        line-height: 1.45;
+    }
+
+    .patient-notifications-count {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 86px;
+        min-height: 38px;
+        padding: 0 14px;
+        border-radius: 999px;
+        background: #eaf8fc;
+        color: #0077b6;
+        font-weight: 950;
+        white-space: nowrap;
+    }
+
+    .patient-notifications-actions {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+    }
+
+    .patient-notification-list {
+        display: grid;
+        gap: 12px;
+        max-height: 620px;
+        overflow-y: auto;
+        padding-right: 6px;
+        scrollbar-width: thin;
+        scrollbar-color: #9bd2e9 #eef8fc;
+    }
+
+    .patient-notification-card {
+        display: grid;
+        grid-template-columns: 48px minmax(0, 1fr) auto;
+        gap: 14px;
+        align-items: center;
+        padding: 18px;
+        border: 1px solid #cde8f3;
+        border-radius: 16px;
+        background: linear-gradient(135deg, #f8fdff 0%, #ffffff 100%);
+        color: #344357;
+        text-decoration: none;
+        box-shadow: 0 12px 28px rgba(2, 62, 138, 0.06);
+        transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+    }
+
+    .patient-notification-card:hover {
+        transform: translateY(-1px);
+        border-color: #8fd6ee;
+        box-shadow: 0 16px 32px rgba(2, 62, 138, 0.10);
+    }
+
+    .patient-notification-card.unread {
+        border-color: #7fd0e8;
+        background: linear-gradient(135deg, #eefaff 0%, #ffffff 100%);
+    }
+
+    .patient-notification-card-icon {
+        display: inline-grid;
+        place-items: center;
+        width: 42px;
+        height: 42px;
+        border-radius: 14px;
+        background: #dff6ff;
+        color: #0077b6;
+    }
+
+    .patient-notification-card.completed .patient-notification-card-icon,
+    .patient-notification-card.approved .patient-notification-card-icon {
+        background: #e6f8ef;
+        color: #0f7a48;
+    }
+
+    .patient-notification-card.cancelled .patient-notification-card-icon {
+        background: #fff1f2;
+        color: #be123c;
+    }
+
+    .patient-notification-card.rescheduled .patient-notification-card-icon {
+        background: #fff7db;
+        color: #8a5b00;
+    }
+
+    .patient-notification-card h4 {
+        margin: 0 0 5px;
+        color: #10233f;
+        font-size: 1rem;
+    }
+
+    .patient-notification-card p {
+        margin: 0;
+        color: #53677a;
+        font-size: 0.9rem;
+        line-height: 1.45;
+    }
+
+    .patient-notification-meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
+        margin-top: 10px;
+        color: #8b99aa;
+        font-size: 0.78rem;
+        font-weight: 800;
+    }
+
+    .patient-notification-status {
+        display: inline-flex;
+        padding: 4px 9px;
+        border-radius: 999px;
+        background: #eaf8fc;
+        color: #0077b6;
+        font-size: 0.72rem;
+        font-weight: 950;
+        text-transform: uppercase;
+    }
+
+    .patient-notification-card-action {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 36px;
+        padding: 0 14px;
+        border-radius: 11px;
+        background: #eaf8fc;
+        color: #0077b6;
+        font-size: 0.82rem;
+        font-weight: 950;
+        white-space: nowrap;
+    }
+
+    .patient-notification-card:hover .patient-notification-card-action {
+        background: #0077b6;
+        color: #ffffff;
     }
 
     .next-card {
@@ -1998,6 +2221,20 @@ $additionalStyles = '
             grid-template-columns: repeat(2, minmax(0, 1fr));
         }
 
+        .patient-notifications-hero {
+            flex-direction: column;
+        }
+
+        .patient-notification-card {
+            grid-template-columns: 44px minmax(0, 1fr);
+            align-items: flex-start;
+        }
+
+        .patient-notification-card-action {
+            grid-column: 2;
+            width: fit-content;
+        }
+
         .hero-actions {
             justify-content: flex-start;
         }
@@ -2016,8 +2253,16 @@ $additionalStyles = '
     }
 
     @media (max-width: 560px) {
+        body.app-role-patient {
+            overflow-x: hidden;
+        }
+
         .patient-shell {
+            width: 100%;
+            max-width: 100%;
             padding: 18px 12px 34px;
+            box-sizing: border-box;
+            overflow-x: hidden;
         }
 
         .clinic-tips-bar {
@@ -2052,10 +2297,21 @@ $additionalStyles = '
         .patient-hero {
             grid-template-columns: 1fr;
             text-align: center;
+            max-width: 100%;
+            box-sizing: border-box;
         }
 
-        .patient-profile-trigger {
+        .patient-hero > .patient-profile-trigger {
             margin: 0 auto;
+            display: inline-grid;
+            place-items: center;
+            width: 88px;
+            height: 88px;
+            min-height: 0;
+            background: transparent;
+            border: 0;
+            box-shadow: none;
+            padding: 0;
         }
     }
 
@@ -2143,6 +2399,71 @@ $additionalStyles = '
         background: linear-gradient(135deg, #ff6b6b 0%, #ee5a6f 100%);
         color: #fff;
     }
+
+    /* Globalife blue dashboard palette */
+    body.app-role-patient {
+        background:
+            radial-gradient(circle at 80% 8%, rgba(72, 202, 228, 0.16), transparent 28%),
+            linear-gradient(135deg, #f4fbff 0%, #f8fcff 54%, #eef8fc 100%);
+    }
+    body.app-role-patient .patient-shell {
+        max-width: 1180px;
+    }
+    body.app-role-patient .patient-hero,
+    body.app-role-patient .patient-hero.is-new-welcome {
+        background:
+            radial-gradient(circle at 88% 16%, rgba(202, 240, 248, 0.20), transparent 28%),
+            linear-gradient(135deg, #0077b6 0%, #005fa8 42%, #023e8a 100%);
+        border: 1px solid rgba(202, 240, 248, 0.28);
+        box-shadow: 0 18px 42px rgba(2, 62, 138, 0.18);
+    }
+    body.app-role-patient .patient-kicker {
+        color: #caf0f8;
+        font-weight: 800;
+    }
+    body.app-role-patient .patient-hero p {
+        color: rgba(255, 255, 255, 0.88);
+    }
+    body.app-role-patient .patient-hero .primary-btn,
+    body.app-role-patient .primary-btn {
+        background: linear-gradient(135deg, #48cae4 0%, #0077b6 100%);
+        color: #ffffff;
+        box-shadow: 0 12px 24px rgba(0, 119, 182, 0.22);
+    }
+    body.app-role-patient .patient-hero .secondary-btn,
+    body.app-role-patient .secondary-btn,
+    body.app-role-patient .plain-btn {
+        background: #ffffff;
+        color: #023e8a;
+        border-color: #cde8f3;
+        box-shadow: 0 10px 20px rgba(2, 62, 138, 0.06);
+    }
+    body.app-role-patient .clinic-step-number {
+        background: linear-gradient(135deg, #48cae4 0%, #0077b6 100%);
+        color: #ffffff;
+    }
+    body.app-role-patient .clinic-tip-card,
+    body.app-role-patient .panel,
+    body.app-role-patient .appointment-row,
+    body.app-role-patient .profile-card-mini,
+    body.app-role-patient .readiness-item,
+    body.app-role-patient .record-card,
+    body.app-role-patient .next-card,
+    body.app-role-patient .empty-state {
+        border-color: #d7eaf3;
+        box-shadow: 0 12px 28px rgba(2, 62, 138, 0.06);
+    }
+    body.app-role-patient .clinic-procedure-head h3,
+    body.app-role-patient .panel-header h3,
+    body.app-role-patient .appointment-main strong,
+    body.app-role-patient .profile-card-mini strong {
+        color: #023e8a;
+    }
+    body.app-role-patient .date-box {
+        background: #eaf8fc;
+        border-color: #cde8f3;
+        color: #0077b6;
+    }
 ';
 
 $additionalHeadLinks = '
@@ -2152,6 +2473,68 @@ $additionalHeadLinks = '
 include 'includes/header.php';
 ?>
     <main class="patient-shell">
+        <?php if ($showNotificationsPage): ?>
+        <section class="patient-notifications-page" aria-labelledby="patientNotificationsTitle">
+            <div class="patient-notifications-hero">
+                <div>
+                    <span class="patient-notifications-kicker">
+                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 7h18s-3 0-3-7"/><path d="M10 20a2 2 0 0 0 4 0"/></svg>
+                        Notifications
+                    </span>
+                    <h3 id="patientNotificationsTitle">Appointment notifications</h3>
+                    <p>Open an update to view the appointment details, approval, cancellation, or schedule change.</p>
+                </div>
+                <div class="patient-notifications-actions">
+                    <span class="patient-notifications-count"><?php echo (int) $patientUnreadNotificationCount; ?> unread</span>
+                    <?php if ($patientUnreadNotificationCount > 0): ?>
+                        <form method="post" action="patients.php?notifications=1">
+                            <input type="hidden" name="patient_action" value="mark_notifications_read">
+                            <button type="submit" class="primary-btn">Mark all read</button>
+                        </form>
+                    <?php endif; ?>
+                </div>
+            </div>
+
+            <?php if (empty($patientNotifications)): ?>
+                <div class="panel">
+                    <div class="empty-state">
+                        <h3>No notifications yet</h3>
+                        <p>Appointment updates from the clinic will appear here.</p>
+                    </div>
+                </div>
+            <?php else: ?>
+                <div class="patient-notification-list">
+                    <?php foreach ($patientNotifications as $notification): ?>
+                        <?php
+                        $notificationMeta = patient_notification_meta($notification);
+                        $notificationUrl = trim((string) ($notification['target_url'] ?? 'view_appointments.php'));
+                        $notificationUrl = $notificationUrl !== '' ? $notificationUrl : 'view_appointments.php';
+                        $notificationUnread = empty($notification['read_at']);
+                        $notificationTimestamp = strtotime((string) ($notification['created_at'] ?? ''));
+                        $notificationTime = $notificationTimestamp ? date('M d, Y g:i A', $notificationTimestamp) : '';
+                        ?>
+                        <a class="patient-notification-card <?php echo htmlspecialchars($notificationMeta['class']); ?><?php echo $notificationUnread ? ' unread' : ''; ?>" href="<?php echo htmlspecialchars($notificationUrl); ?>">
+                            <span class="patient-notification-card-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24"><path d="<?php echo htmlspecialchars($notificationMeta['icon']); ?>"/></svg>
+                            </span>
+                            <span>
+                                <h4><?php echo htmlspecialchars((string) ($notification['title'] ?? 'Appointment update')); ?></h4>
+                                <p><?php echo htmlspecialchars((string) ($notification['message'] ?? '')); ?></p>
+                                <span class="patient-notification-meta">
+                                    <?php if ($notificationTime !== ''): ?>
+                                        <span><?php echo htmlspecialchars($notificationTime); ?></span>
+                                    <?php endif; ?>
+                                    <span class="patient-notification-status"><?php echo htmlspecialchars($notificationMeta['label']); ?></span>
+                                    <span><?php echo $notificationUnread ? 'Unread' : 'Read'; ?></span>
+                                </span>
+                            </span>
+                            <span class="patient-notification-card-action">Open Details</span>
+                        </a>
+                    <?php endforeach; ?>
+                </div>
+            <?php endif; ?>
+        </section>
+        <?php else: ?>
         <section class="patient-hero<?php echo $isNewPatientWelcome ? ' is-new-welcome' : ''; ?>">
             <button type="button" class="patient-profile-trigger" id="openProfileFromHero" aria-label="Open my profile">
                 <?php if ($profilePhotoUrl): ?>
@@ -2430,6 +2813,7 @@ include 'includes/header.php';
                 </section>
             </aside>
         </div>
+        <?php endif; ?>
     </main>
 
     <div class="profile-modal-overlay" id="patientProfileModal" role="dialog" aria-modal="true" aria-labelledby="patientProfileModalTitle">
