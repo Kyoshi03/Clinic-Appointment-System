@@ -402,9 +402,6 @@ include 'includes/header.php';
                                 <?php endforeach; ?>
                             <?php endif; ?>
                         </div>
-                        <div class="doctor-actions">
-                            <a class="rd-btn secondary" href="receptionist_doctors.php?edit=<?php echo (int) $doctor['id']; ?>"><?php echo $hasSchedule ? 'Edit schedule' : 'Add schedule'; ?></a>
-                        </div>
                     </article>
                 <?php endforeach; ?>
             </div>

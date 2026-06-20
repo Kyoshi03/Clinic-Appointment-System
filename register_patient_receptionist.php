@@ -135,6 +135,8 @@ $requestDirectory = str_replace('\\', '/', dirname((string) ($_SERVER['SCRIPT_NA
 $requestDirectory = $requestDirectory === '/' ? '' : rtrim($requestDirectory, '/');
 $walkInRegistrationUrl = $requestScheme . '://' . $requestHost . $requestDirectory . '/register_patient.php?source=walkin_qr';
 $walkInQrImageUrl = 'https://api.qrserver.com/v1/create-qr-code/?size=300x300&margin=12&data=' . rawurlencode($walkInRegistrationUrl);
+$walkInQrFallbackImageUrl = 'storage/qr/walkin_registration_local.png';
+$walkInQrFallbackReady = is_file(__DIR__ . '/' . $walkInQrFallbackImageUrl);
 $additionalStyles = '
     body {
         background:
@@ -1032,7 +1034,15 @@ include 'includes/header.php';
             <button type="button" class="qr-modal-close" id="closeWalkInQr" aria-label="Close">&times;</button>
         </div>
         <div class="qr-code-frame">
-            <img src="<?php echo htmlspecialchars($walkInQrImageUrl); ?>" alt="QR code for patient registration" width="250" height="250">
+            <img
+                src="<?php echo htmlspecialchars($walkInQrImageUrl); ?>"
+                <?php if ($walkInQrFallbackReady): ?>
+                    onerror="this.onerror=null;this.src='<?php echo htmlspecialchars($walkInQrFallbackImageUrl); ?>';"
+                <?php endif; ?>
+                alt="QR code for patient registration"
+                width="250"
+                height="250"
+            >
         </div>
         <p class="qr-modal-note">After email verification, the administrator will receive a new patient account notification.</p>
         <button type="button" class="qr-page-link" id="printWalkInQr">Print / Save as PDF</button>

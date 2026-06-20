@@ -4,8 +4,148 @@ require_once __DIR__ . '/mailer.php';
 require_once __DIR__ . '/sms.php';
 require_once __DIR__ . '/doctor_schedule.php';
 require_once __DIR__ . '/lab_services_seed_data.php';
+require_once __DIR__ . '/admin_notifications.php';
 require_once __DIR__ . '/patient_notifications.php';
 require_once __DIR__ . '/clinic_notifications.php';
+
+const APPOINTMENT_DOCTOR_DAILY_LIMIT = 30;
+const APPOINTMENT_LAB_DAILY_LIMIT = 15;
+
+function appointment_doctor_daily_limit(): int {
+    return APPOINTMENT_DOCTOR_DAILY_LIMIT;
+}
+
+function appointment_lab_daily_limit(): int {
+    return APPOINTMENT_LAB_DAILY_LIMIT;
+}
+
+function appointment_doctor_daily_count(mysqli $conn, int $doctorId, string $date): int {
+    if ($doctorId <= 0 || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+        return 0;
+    }
+
+    $stmt = $conn->prepare(
+        "SELECT COUNT(*) AS total
+         FROM appointments
+         WHERE doctor_id = ?
+           AND appointment_date = ?
+           AND booking_type = 'consultation'
+           AND status <> 'cancelled'"
+    );
+    $stmt->bind_param('is', $doctorId, $date);
+    $stmt->execute();
+    $count = (int) ($stmt->get_result()->fetch_assoc()['total'] ?? 0);
+    $stmt->close();
+    return $count;
+}
+
+/**
+ * @return array<int,array<string,int>>
+ */
+function appointment_doctor_daily_counts_between(
+    mysqli $conn,
+    string $dateFrom,
+    string $dateTo,
+    array $doctorIds = []
+): array {
+    $counts = [];
+    $doctorIds = array_values(array_unique(array_filter(
+        array_map('intval', $doctorIds),
+        static fn (int $id): bool => $id > 0
+    )));
+
+    $sql = "SELECT doctor_id, appointment_date, COUNT(*) AS total
+            FROM appointments
+            WHERE doctor_id IS NOT NULL
+              AND appointment_date >= ?
+              AND appointment_date < ?
+              AND booking_type = 'consultation'
+              AND status <> 'cancelled'";
+    if ($doctorIds) {
+        $sql .= ' AND doctor_id IN (' . implode(',', $doctorIds) . ')';
+    }
+    $sql .= ' GROUP BY doctor_id, appointment_date';
+
+    $stmt = $conn->prepare($sql);
+    $stmt->bind_param('ss', $dateFrom, $dateTo);
+    $stmt->execute();
+    foreach ($stmt->get_result()->fetch_all(MYSQLI_ASSOC) as $row) {
+        $doctorId = (int) ($row['doctor_id'] ?? 0);
+        $date = (string) ($row['appointment_date'] ?? '');
+        if ($doctorId > 0 && $date !== '') {
+            $counts[$doctorId][$date] = (int) ($row['total'] ?? 0);
+        }
+    }
+    $stmt->close();
+    return $counts;
+}
+
+function appointment_doctor_day_capacity(mysqli $conn, int $doctorId, string $date): array {
+    $booked = appointment_doctor_daily_count($conn, $doctorId, $date);
+    $limit = appointment_doctor_daily_limit();
+    return [
+        'booked' => $booked,
+        'remaining' => max(0, $limit - $booked),
+        'limit' => $limit,
+        'is_full' => $booked >= $limit,
+    ];
+}
+
+function appointment_lab_daily_count(mysqli $conn, string $date): int {
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+        return 0;
+    }
+
+    $stmt = $conn->prepare(
+        "SELECT COUNT(*) AS total
+         FROM appointments
+         WHERE appointment_date = ?
+           AND booking_type IN ('package', 'individual')
+           AND status <> 'cancelled'"
+    );
+    $stmt->bind_param('s', $date);
+    $stmt->execute();
+    $count = (int) ($stmt->get_result()->fetch_assoc()['total'] ?? 0);
+    $stmt->close();
+    return $count;
+}
+
+/**
+ * @return array<string,int>
+ */
+function appointment_lab_daily_counts_between(mysqli $conn, string $dateFrom, string $dateTo): array {
+    $counts = [];
+    $stmt = $conn->prepare(
+        "SELECT appointment_date, COUNT(*) AS total
+         FROM appointments
+         WHERE appointment_date >= ?
+           AND appointment_date < ?
+           AND booking_type IN ('package', 'individual')
+           AND status <> 'cancelled'
+         GROUP BY appointment_date"
+    );
+    $stmt->bind_param('ss', $dateFrom, $dateTo);
+    $stmt->execute();
+    foreach ($stmt->get_result()->fetch_all(MYSQLI_ASSOC) as $row) {
+        $date = (string) ($row['appointment_date'] ?? '');
+        if ($date !== '') {
+            $counts[$date] = (int) ($row['total'] ?? 0);
+        }
+    }
+    $stmt->close();
+    return $counts;
+}
+
+function appointment_lab_day_capacity(mysqli $conn, string $date): array {
+    $booked = appointment_lab_daily_count($conn, $date);
+    $limit = appointment_lab_daily_limit();
+    return [
+        'booked' => $booked,
+        'remaining' => max(0, $limit - $booked),
+        'limit' => $limit,
+        'is_full' => $booked >= $limit,
+    ];
+}
 
 function appointment_mask_email(string $email): string {
     $email = trim($email);
@@ -132,20 +272,25 @@ function appointment_validate_payload(mysqli $conn, int $patientId, array $paylo
         }
         $doctorName = (string) $doctor['full_name'];
 
-        $doctorConflict = $conn->prepare(
-            "SELECT id FROM appointments
-             WHERE doctor_id = ? AND appointment_date = ? AND appointment_time = ?
-               AND status != 'cancelled'
-             LIMIT 1"
-        );
-        $doctorConflict->bind_param('iss', $doctorId, $date, $time);
-        $doctorConflict->execute();
-        $doctorConflictRow = $doctorConflict->get_result()->fetch_assoc();
-        $doctorConflict->close();
-        if ($doctorConflictRow) {
-            return ['ok' => false, 'error' => 'This doctor already has an appointment at the selected time. Please choose another time.'];
+        $capacity = appointment_doctor_day_capacity($conn, $doctorId, $date);
+        if ($capacity['is_full']) {
+            return [
+                'ok' => false,
+                'error' => 'This doctor is fully booked on the selected date ('
+                    . $capacity['booked'] . '/' . $capacity['limit']
+                    . ' appointments). Please choose another date.',
+            ];
         }
     } else {
+        $capacity = appointment_lab_day_capacity($conn, $date);
+        if ($capacity['is_full']) {
+            return [
+                'ok' => false,
+                'error' => 'Laboratory appointments are fully booked on the selected date ('
+                    . $capacity['booked'] . '/' . $capacity['limit']
+                    . ' bookings). Please choose another date.',
+            ];
+        }
         $doctorId = 0;
     }
 
@@ -604,6 +749,7 @@ function appointment_verify_and_create(mysqli $conn, int $patientId, int $verifi
     }
 
     $conn->begin_transaction();
+    $capacityLockName = '';
     try {
         $doctorId = $booking['doctor_id'];
         $appointmentDate = (string) $booking['appointment_date'];
@@ -611,6 +757,45 @@ function appointment_verify_and_create(mysqli $conn, int $patientId, int $verifi
         $bookingType = (string) $booking['type'];
         $total = (float) $validated['total'];
         $priceChannel = (string) $booking['price_channel'];
+        if ($doctorId !== null && $bookingType === 'consultation') {
+            $capacityLockName = 'doctor-consultation-capacity-' . (int) $doctorId . '-' . $appointmentDate;
+            $lockStmt = $conn->prepare('SELECT GET_LOCK(?, 5) AS acquired');
+            $lockStmt->bind_param('s', $capacityLockName);
+            $lockStmt->execute();
+            $lockAcquired = (int) ($lockStmt->get_result()->fetch_assoc()['acquired'] ?? 0);
+            $lockStmt->close();
+            if ($lockAcquired !== 1) {
+                throw new RuntimeException('The selected date is being updated. Please try again.');
+            }
+
+            $capacity = appointment_doctor_day_capacity($conn, (int) $doctorId, $appointmentDate);
+            if ($capacity['is_full']) {
+                throw new RuntimeException(
+                    'This doctor is fully booked on the selected date ('
+                    . $capacity['booked'] . '/' . $capacity['limit']
+                    . ' appointments). Please choose another date.'
+                );
+            }
+        } elseif (in_array($bookingType, ['package', 'individual'], true)) {
+            $capacityLockName = 'laboratory-appointment-capacity-' . $appointmentDate;
+            $lockStmt = $conn->prepare('SELECT GET_LOCK(?, 5) AS acquired');
+            $lockStmt->bind_param('s', $capacityLockName);
+            $lockStmt->execute();
+            $lockAcquired = (int) ($lockStmt->get_result()->fetch_assoc()['acquired'] ?? 0);
+            $lockStmt->close();
+            if ($lockAcquired !== 1) {
+                throw new RuntimeException('The selected date is being updated. Please try again.');
+            }
+
+            $capacity = appointment_lab_day_capacity($conn, $appointmentDate);
+            if ($capacity['is_full']) {
+                throw new RuntimeException(
+                    'Laboratory appointments are fully booked on the selected date ('
+                    . $capacity['booked'] . '/' . $capacity['limit']
+                    . ' bookings). Please choose another date.'
+                );
+            }
+        }
         if ($doctorId === null) {
             $insert = $conn->prepare(
                 "INSERT INTO appointments
@@ -701,8 +886,20 @@ function appointment_verify_and_create(mysqli $conn, int $patientId, int $verifi
         }
         $used->close();
         $conn->commit();
+        if ($capacityLockName !== '') {
+            $releaseStmt = $conn->prepare('SELECT RELEASE_LOCK(?)');
+            $releaseStmt->bind_param('s', $capacityLockName);
+            $releaseStmt->execute();
+            $releaseStmt->close();
+        }
     } catch (Throwable $e) {
         $conn->rollback();
+        if ($capacityLockName !== '') {
+            $releaseStmt = $conn->prepare('SELECT RELEASE_LOCK(?)');
+            $releaseStmt->bind_param('s', $capacityLockName);
+            $releaseStmt->execute();
+            $releaseStmt->close();
+        }
         return ['ok' => false, 'error' => $e->getMessage()];
     }
 
@@ -722,6 +919,7 @@ function appointment_verify_and_create(mysqli $conn, int $patientId, int $verifi
     $smsResult = appointment_send_booking_sms($details);
     create_patient_appointment_notification($conn, $appointmentId, 'booked');
     create_clinic_appointment_notification($conn, $appointmentId, 'booked');
+    create_admin_appointment_notification($conn, $appointmentId, 'booked');
 
     return [
         'ok' => true,

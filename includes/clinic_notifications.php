@@ -94,6 +94,7 @@ function create_clinic_appointment_notification(mysqli $conn, int $appointmentId
     $events = [
         'booked' => [
             ['receptionist', null, 'New appointment request', "{$patient} booked {$services} for {$schedule}. Review and confirm the request."],
+            ['nurse', null, 'New patient booking', "{$patient} booked {$services} for {$schedule}. Watch the clinic queue for updates."],
         ],
         'confirmed' => [
             ['nurse', null, 'Patient ready for care', "{$patient}'s {$services} appointment is confirmed for {$schedule}."],

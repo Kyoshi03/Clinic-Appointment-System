@@ -25,7 +25,7 @@ $users = [
     [
         'username' => 'nurse1',
         'password' => $defaultPassword,
-        'full_name' => 'Dr. Maria Santos',
+        'full_name' => 'DRA. RODA TEBELIN',
         'role' => 'nurse',
         'email' => 'nurse1@globalife.com',
         'phone' => '09123456790'
@@ -90,4 +90,3 @@ echo "- nurse1 / password123 (Nurse/Doctor)<br>";
 echo "- receptionist1 / password123 (Receptionist)<br>";
 echo "- patient1 / password123 (Patient)<br>";
 ?>
-

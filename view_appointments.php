@@ -369,6 +369,14 @@ $additionalStyles = patientAvatarStyles() . '
         gap: 10px;
         flex-wrap: wrap;
     }
+    .action-buttons.pending-actions {
+        display: grid;
+        grid-template-columns: repeat(2, max-content);
+        align-items: start;
+    }
+    .action-buttons.pending-actions .decline-action {
+        grid-column: 2;
+    }
     .btn {
         padding: 8px 16px;
         border: none;
@@ -419,25 +427,25 @@ $additionalStyles = patientAvatarStyles() . '
     .appointment-row { cursor: pointer; }
     .appointment-row:focus { outline: 3px solid rgba(0,119,182,.25); outline-offset: -3px; }
     .appointment-row.is-highlighted { outline: 3px solid rgba(72, 202, 228, .45); outline-offset: -3px; background: #f0fbff; }
-    .appointment-modal { position: fixed; inset: 0; z-index: 3000; display: none; align-items: center; justify-content: center; padding: 18px; background: rgba(3, 18, 30, .55); }
+    .appointment-modal { position: fixed; inset: 0; z-index: 3000; display: none; align-items: center; justify-content: center; padding: 18px; background: rgba(3, 18, 30, .50); backdrop-filter: blur(4px); }
     .appointment-modal.is-open { display: flex; }
-    .appointment-modal-card { width: min(680px, 100%); background: #fff; border-radius: 18px; box-shadow: 0 22px 60px rgba(2,62,138,.22); overflow: hidden; border: 1px solid rgba(202,240,248,.45); }
-    .appointment-modal-head { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; padding: 22px 24px; background: linear-gradient(135deg, #0077b6 0%, #023e8a 100%); border-bottom: 1px solid #dce9f4; color: #fff; }
-    .appointment-modal-head h3 { margin: 0; color: #fff; font-size: 1.22rem; }
-    .appointment-modal-head p { margin: 4px 0 0; color: rgba(255,255,255,.82); font-size: .92rem; }
-    .modal-close { border: 0; background: rgba(255,255,255,.16); color: #fff; width: 36px; height: 36px; border-radius: 10px; cursor: pointer; font-size: 1.35rem; line-height: 1; }
-    .modal-close:hover { background: rgba(255,255,255,.26); }
-    .appointment-modal-body { padding: 20px 22px; }
+    .appointment-modal-card { width: min(720px, 100%); background: #fff; border-radius: 22px; box-shadow: 0 24px 70px rgba(2,62,138,.20); overflow: hidden; border: 1px solid #cde8f3; }
+    .appointment-modal-head { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; padding: 24px 26px; background: radial-gradient(circle at 90% 12%, rgba(72,202,228,.24), transparent 34%), linear-gradient(135deg, #ffffff 0%, #eefaff 100%); border-bottom: 1px solid #d8eef7; color: #10233f; }
+    .appointment-modal-head h3 { margin: 0; color: #10233f; font-size: 1.28rem; line-height: 1.2; }
+    .appointment-modal-head p { display: inline-flex; align-items: center; margin: 8px 0 0; padding: 7px 11px; border-radius: 999px; background: #eaf8fc; color: #0077b6; font-size: .86rem; font-weight: 850; }
+    .modal-close { border: 0; background: #eaf8fc; color: #0077b6; width: 40px; height: 40px; border-radius: 13px; cursor: pointer; font-size: 1.35rem; line-height: 1; font-weight: 900; }
+    .modal-close:hover { background: #d8f2fb; }
+    .appointment-modal-body { padding: 22px 24px; }
     .detail-summary-strip { display:grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 10px; margin-bottom: 18px; }
-    .detail-pill { background:#f8fcfd; border:1px solid #dceef2; border-radius:12px; padding:12px; }
+    .detail-pill { background:#f8fdff; border:1px solid #d8eef7; border-radius:14px; padding:14px; }
     .detail-pill span { display:block; color:#60758a; font-size:.75rem; font-weight:800; text-transform:uppercase; letter-spacing:.04em; margin-bottom:4px; }
-    .detail-pill strong { color:#073b4c; font-size:.98rem; overflow-wrap:anywhere; }
-    .appointment-detail-grid { display: grid; grid-template-columns: 150px 1fr; gap: 10px 14px; }
-    .appointment-detail-grid dt { color: #60758a; font-weight: 700; }
-    .appointment-detail-grid dd { margin: 0; color: #12263a; overflow-wrap: anywhere; }
-    .detail-notes-box { margin-top: 18px; padding: 14px; border-radius: 12px; background:#fff8e6; border:1px solid #ffe08a; color:#4d4219; line-height:1.55; }
-    .detail-notes-box strong { display:block; color:#5c4a1a; margin-bottom:6px; }
-    .appointment-modal-actions { display: flex; justify-content: flex-end; gap: 10px; padding: 0 22px 22px; }
+    .detail-pill strong { color:#10233f; font-size:1rem; overflow-wrap:anywhere; }
+    .appointment-detail-grid { display: grid; grid-template-columns: 150px 1fr; gap: 12px 16px; padding: 16px; border: 1px solid #d8eef7; border-radius: 16px; background: #ffffff; }
+    .appointment-detail-grid dt { color: #60758a; font-weight: 850; }
+    .appointment-detail-grid dd { margin: 0; color: #315c70; overflow-wrap: anywhere; line-height: 1.45; }
+    .detail-notes-box { margin-top: 16px; padding: 16px; border-radius: 16px; background:#f8fdff; border:1px solid #d8eef7; color:#315c70; line-height:1.55; }
+    .detail-notes-box strong { display:block; color:#10233f; margin-bottom:6px; }
+    .appointment-modal-actions { display: flex; justify-content: flex-end; gap: 10px; padding: 0 24px 24px; }
     .btn-light { background: #eef5fb; color: #023e8a; }
     .btn-light:hover { background: #dcecf8; }
     .empty-state {
@@ -481,6 +489,9 @@ $additionalStyles = patientAvatarStyles() . '
         .detail-summary-strip {
             grid-template-columns: 1fr;
         }
+        .appointment-detail-grid {
+            grid-template-columns: 1fr;
+        }
         .appointments-table-wrapper {
             padding: 15px;
         }
@@ -509,46 +520,6 @@ include 'includes/header.php';
 ?>
 
 <div class="appointments-container">
-    <div class="page-header<?php echo $userRole === 'patient' ? ' patient-page-header' : ''; ?>">
-        <h2>Appointments</h2>
-        <p><?php echo $userRole === 'patient' ? 'View your bookings, check the status, and open details anytime.' : 'Track appointments, review patient details, and update visit status from one place.'; ?></p>
-        <div class="appointment-actions-top">
-            <?php if ($userRole === 'patient'): ?>
-            <?php elseif ($userRole === 'receptionist'): ?>
-                <a href="register_patient_receptionist.php">Register patient</a>
-                <a href="receptionist_doctors.php">Doctor schedules</a>
-            <?php elseif ($userRole === 'admin'): ?>
-                <a href="admin_doctors.php">Manage doctors</a>
-                <a href="admin_lab_services.php">Manage lab services</a>
-            <?php elseif ($userRole === 'nurse' || $userRole === 'doctor'): ?>
-                <a href="nurse_patients.php">Open patient records</a>
-            <?php endif; ?>
-        </div>
-    </div>
-
-    <div class="appointment-stats" aria-label="Appointment summary">
-        <div class="stat-card">
-            <span>Total</span>
-            <strong><?php echo (int) $statusCounts['all']; ?></strong>
-            <p>All appointments visible to your account.</p>
-        </div>
-        <div class="stat-card">
-            <span>Today</span>
-            <strong><?php echo (int) $todayCount; ?></strong>
-            <p>Scheduled for today.</p>
-        </div>
-        <div class="stat-card">
-            <span>Upcoming</span>
-            <strong><?php echo (int) $upcomingCount; ?></strong>
-            <p>Pending or confirmed visits ahead.</p>
-        </div>
-        <div class="stat-card">
-            <span>Needs attention</span>
-            <strong><?php echo (int) $needsAttentionCount; ?></strong>
-            <p>Past pending or confirmed appointments.</p>
-        </div>
-    </div>
-    
     <?php if (isset($_SESSION['success'])): ?>
         <div style="background: #d4edda; color: #155724; padding: 15px; border-radius: 10px; margin-bottom: 20px; border-left: 4px solid #28a745;">
             <?php echo htmlspecialchars($_SESSION['success']); unset($_SESSION['success']); ?>
@@ -662,7 +633,7 @@ include 'includes/header.php';
                         <option value="pending">Pending (<?php echo (int) $statusCounts['pending']; ?>)</option>
                         <option value="confirmed">Confirmed (<?php echo (int) $statusCounts['confirmed']; ?>)</option>
                         <option value="completed">Completed (<?php echo (int) $statusCounts['completed']; ?>)</option>
-                        <option value="cancelled">Cancelled (<?php echo (int) $statusCounts['cancelled']; ?>)</option>
+                        <option value="cancelled">Declined (<?php echo (int) $statusCounts['cancelled']; ?>)</option>
                     </select>
                 </div>
                 <div class="tool-field">
@@ -683,7 +654,6 @@ include 'includes/header.php';
                                 <th>Doctor</th>
                             <?php endif; ?>
                             <th>Date</th>
-                            <th>Time</th>
                             <th>Status</th>
                             <th>Notes</th>
                             <th>Actions</th>
@@ -720,6 +690,7 @@ include 'includes/header.php';
                             $bookingType = 'Laboratory tests';
                         }
                         $statusValue = strtolower((string) ($appointment['status'] ?? 'pending'));
+                        $statusLabel = $statusValue === 'cancelled' ? 'Declined' : ucfirst($statusValue);
                         $searchText = trim(implode(' ', [
                             '#' . (int) ($appointment['id'] ?? 0),
                             $patientDisplay['patient_name'] ?? '',
@@ -738,7 +709,7 @@ include 'includes/header.php';
                             'date' => $formattedDate,
                             'time' => $formattedTime,
                             'rawDate' => (string) ($appointment['appointment_date'] ?? ''),
-                            'status' => ucfirst($statusValue),
+                            'status' => $statusLabel,
                             'statusKey' => $statusValue,
                             'bookingType' => $bookingType,
                             'totalAmount' => $totalAmount,
@@ -773,38 +744,36 @@ include 'includes/header.php';
                                 <td><?php echo htmlspecialchars($appointment['doctor_name'] ?? 'Not Assigned'); ?></td>
                             <?php endif; ?>
                             <td><strong><?php echo $formattedDate; ?></strong></td>
-                            <td><?php echo $formattedTime; ?></td>
                             <td>
                                 <span class="status-badge <?php echo htmlspecialchars($statusValue); ?>">
-                                    <?php echo ucfirst($statusValue); ?>
+                                    <?php echo htmlspecialchars($statusLabel); ?>
                                 </span>
                             </td>
                             <td><?php echo htmlspecialchars($servicesText !== 'Not listed' ? $servicesText : ($notesFull !== '' ? substr($notesFull, 0, 50) : 'No notes')); ?><?php echo strlen($servicesText !== 'Not listed' ? $servicesText : $notesFull) > 50 ? '...' : ''; ?></td>
                             <td>
-                                <div class="action-buttons">
+                                <div class="action-buttons <?php echo ($userRole === 'receptionist' || $userRole === 'admin') && $appointment['status'] === 'pending' ? 'pending-actions' : ''; ?>">
                                     <button type="button" class="btn btn-view" data-open-details>Details</button>
                                     <?php if ($userRole === 'receptionist' || $userRole === 'admin'): ?>
                                         <?php if ($appointment['status'] === 'pending'): ?>
-                                            <form method="POST" action="update_appointment_status.php" style="display:inline;">
+                                            <form method="POST" action="update_appointment_status.php" class="confirm-action" style="display:inline;">
                                                 <input type="hidden" name="appointment_id" value="<?php echo $appointment['id']; ?>">
                                                 <input type="hidden" name="status" value="confirmed">
                                                 <button type="submit" class="btn btn-confirm" data-confirm-message="Confirm this appointment?">Confirm</button>
                                             </form>
-                                        <?php endif; ?>
-                                        <?php if ($appointment['status'] !== 'completed' && $appointment['status'] !== 'cancelled'): ?>
+                                            <form method="POST" action="update_appointment_status.php" class="decline-action" style="display:inline;">
+                                                <input type="hidden" name="appointment_id" value="<?php echo $appointment['id']; ?>">
+                                                <input type="hidden" name="status" value="cancelled">
+                                                <button type="submit" class="btn btn-cancel" data-confirm-message="Decline this appointment?">Decline</button>
+                                            </form>
+                                        <?php elseif ($appointment['status'] === 'confirmed'): ?>
                                             <form method="POST" action="update_appointment_status.php" style="display:inline;">
                                                 <input type="hidden" name="appointment_id" value="<?php echo $appointment['id']; ?>">
                                                 <input type="hidden" name="status" value="completed">
                                                 <button type="submit" class="btn btn-complete" data-confirm-message="Mark this appointment as completed?">Complete</button>
                                             </form>
-                                            <form method="POST" action="update_appointment_status.php" style="display:inline;">
-                                                <input type="hidden" name="appointment_id" value="<?php echo $appointment['id']; ?>">
-                                                <input type="hidden" name="status" value="cancelled">
-                                                <button type="submit" class="btn btn-cancel" data-confirm-message="Cancel this appointment?">Cancel</button>
-                                            </form>
                                         <?php endif; ?>
                                     <?php endif; ?>
-                                    <?php if ($userRole === 'patient' && ($appointment['status'] === 'pending' || $appointment['status'] === 'confirmed')): ?>
+                                    <?php if ($userRole === 'patient' && $appointment['status'] === 'pending'): ?>
                                         <form method="POST" action="update_appointment_status.php" style="display:inline;">
                                             <input type="hidden" name="appointment_id" value="<?php echo $appointment['id']; ?>">
                                             <input type="hidden" name="status" value="cancelled">
@@ -923,7 +892,6 @@ include 'includes/header.php';
             ['Patient', data.patient],
             ['Doctor', data.doctor],
             ['Date', data.date],
-            ['Time', data.time],
             ['Booking type', data.bookingType],
             ['Services', data.services]
         ];
@@ -933,7 +901,7 @@ include 'includes/header.php';
         if (detailNotes) {
             detailNotes.innerHTML = '<strong>Notes</strong><span>' + escapeHtml(data.notes) + '</span>';
         }
-        if (detailSub) detailSub.textContent = text(data.reference) + ' - ' + text(data.status);
+        if (detailSub) detailSub.textContent = text(data.reference) + ' • ' + text(data.status);
         openModal(detailModal);
     }
 

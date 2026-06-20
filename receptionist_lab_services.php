@@ -387,28 +387,8 @@ $additionalStyles = '
 include 'includes/header.php';
 ?>
 <main class="lab-wrap">
-    <section class="lab-hero">
-        <div>
-            <h1>Laboratory services manager</h1>
-            <p>Add packages, update prices, hide unavailable tests, and keep the receptionist catalog aligned with patient booking.</p>
-        </div>
-        <form method="post" data-confirm-form="1" data-confirm-mode="simple" data-confirm-message="Import missing default catalog rows?" data-confirm-title="Import catalog" data-confirm-button="Import">
-            <input type="hidden" name="receptionist_svc_action" value="import_catalog">
-            <button type="submit" class="btn secondary">Import missing catalog</button>
-            <button type="button" class="btn secondary" onclick="window.print()">Print price list</button>
-        </form>
-    </section>
-
     <?php if ($message): ?><div class="msg-ok"><?php echo htmlspecialchars($message); ?></div><?php endif; ?>
     <?php if ($error): ?><div class="msg-err"><?php echo htmlspecialchars($error); ?></div><?php endif; ?>
-
-    <section class="lab-grid" aria-label="Lab service summary">
-        <div class="lab-stat"><span>Total services</span><strong><?php echo count($allRows); ?></strong></div>
-        <div class="lab-stat"><span>Active</span><strong><?php echo $activeCount; ?></strong></div>
-        <div class="lab-stat"><span>Inactive</span><strong><?php echo $inactiveCount; ?></strong></div>
-        <div class="lab-stat"><span>Packages</span><strong><?php echo $packageCount; ?></strong></div>
-        <div class="lab-stat"><span>Home priced</span><strong><?php echo $homeCount; ?></strong></div>
-    </section>
 
     <section class="lab-card">
         <h2>Catalog tools</h2>

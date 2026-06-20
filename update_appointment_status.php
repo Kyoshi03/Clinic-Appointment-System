@@ -73,6 +73,7 @@ if ($updateStmt->execute()) {
     if ($new_status !== $appointment['status']) {
         create_patient_appointment_notification($conn, (int) $appointment_id, $new_status);
         create_clinic_appointment_notification($conn, (int) $appointment_id, $new_status);
+        create_admin_appointment_notification($conn, (int) $appointment_id, $new_status);
     }
     if ($new_status === 'confirmed' && $appointment['status'] !== 'confirmed') {
         $emailResult = appointment_send_clinic_confirmation_email($conn, (int) $appointment_id);
@@ -99,6 +100,5 @@ $conn->close();
 
 header('Location: view_appointments.php');
 exit();
-
 
 

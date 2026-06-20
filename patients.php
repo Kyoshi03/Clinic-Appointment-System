@@ -8,6 +8,8 @@ require_once 'includes/nurse_medical_fields.php';
 require_once 'includes/password_reset.php';
 require_once 'includes/sms.php';
 require_once 'includes/patient_notifications.php';
+require_once 'includes/clinic_notifications.php';
+require_once 'includes/admin_notifications.php';
 
 const PATIENT_PROFILE_NAME_MAX = 40;
 const PATIENT_PROFILE_VERIFY_SESSION = 'patient_profile_pending_change';
@@ -211,6 +213,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['patient_action'] ?? '') ==
         $cancel->bind_param('sii', $cancelStatus, $appointmentId, $currentUser['id']);
         if ($cancel->execute() && $cancel->affected_rows > 0) {
             $_SESSION['patient_dashboard_message'] = 'Appointment cancelled.';
+            create_patient_appointment_notification($conn, $appointmentId, 'cancelled');
+            create_clinic_appointment_notification($conn, $appointmentId, 'cancelled');
+            create_admin_appointment_notification($conn, $appointmentId, 'cancelled');
         } else {
             $_SESSION['patient_dashboard_error'] = 'This appointment cannot be cancelled.';
         }
@@ -2554,7 +2559,7 @@ include 'includes/header.php';
             </div>
             <div class="hero-actions">
                 <?php if ($isNewPatientWelcome || $upcomingCount === 0): ?>
-                    <a href="book_appointment.php?start=1" class="primary-btn">Book First Appointment</a>
+                    <a href="book_appointment.php?start=1" class="primary-btn">Book Appointment</a>
                 <?php else: ?>
                     <a href="book_appointment.php?start=1" class="primary-btn">Book Appointment</a>
                 <?php endif; ?>

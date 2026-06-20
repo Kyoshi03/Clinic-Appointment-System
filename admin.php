@@ -293,63 +293,6 @@ body {
     border: 1px solid #ffd0d5;
 }
 
-.notification-panel {
-    margin-bottom: 16px;
-    padding: 20px;
-}
-
-.notification-count {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    min-width: 28px;
-    height: 28px;
-    border-radius: 999px;
-    background: #0f7cc2;
-    color: #fff;
-    padding: 0 8px;
-    font-size: 0.8rem;
-    font-weight: 900;
-}
-
-.notification-list {
-    display: grid;
-    gap: 8px;
-    max-height: 260px;
-    overflow-y: auto;
-    padding-right: 4px;
-}
-
-.notification-item {
-    border: 1px solid #dce8ef;
-    border-left: 4px solid #9fb5c2;
-    border-radius: 8px;
-    background: #fff;
-    padding: 12px 14px;
-}
-
-.notification-item.unread {
-    border-left-color: #0f7cc2;
-    background: #f3f9fd;
-}
-
-.notification-item strong {
-    display: block;
-    color: #073b4c;
-}
-
-.notification-item p {
-    margin: 4px 0;
-    color: #4f6672;
-    line-height: 1.45;
-}
-
-.notification-item time {
-    color: #71838d;
-    font-size: 0.8rem;
-    font-weight: 700;
-}
-
 .admin-notifications-page {
     display: grid;
     gap: 16px;
@@ -804,8 +747,8 @@ include 'includes/header.php';
                         <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 7h18s-3 0-3-7M10 20a2 2 0 0 0 4 0" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
                         Admin notifications
                     </span>
-                    <h1 id="adminNotificationsTitle">Account and system notifications</h1>
-                    <p>New patient accounts, reception desk QR registrations, and important admin updates appear here.</p>
+                    <h1 id="adminNotificationsTitle">Clinic notifications</h1>
+                    <p>New patient accounts, appointment bookings, cancellations, and important clinic updates appear here.</p>
                 </div>
                 <div class="admin-notifications-actions">
                     <span class="admin-unread-pill"><?php echo (int) $unreadNotificationCount; ?> unread</span>
@@ -829,6 +772,11 @@ include 'includes/header.php';
                         $notificationDate = $notificationTime ? date('M d, Y g:i A', $notificationTime) : '';
                         $isUnread = empty($notification['read_at']);
                         $statusLabel = str_replace('_', ' ', $notificationType !== '' ? $notificationType : 'admin update');
+                        $openUrl = trim((string) ($notification['target_url'] ?? ''));
+                        if ($openUrl === '') {
+                            $openUrl = strpos($notificationType, 'appointment') !== false ? 'view_appointments.php' : 'admin_accounts.php';
+                        }
+                        $openLabel = strpos($notificationType, 'appointment') !== false ? 'Open appointment' : 'Open accounts';
                         ?>
                         <article id="notification-<?php echo $notificationId; ?>" class="admin-notification-card <?php echo $isUnread ? 'unread' : ''; ?>">
                             <span class="admin-notification-icon" aria-hidden="true">
@@ -845,7 +793,7 @@ include 'includes/header.php';
                                     <span><?php echo $isUnread ? 'Unread' : 'Read'; ?></span>
                                 </span>
                             </div>
-                            <a class="admin-notification-open" href="admin_accounts.php">Open Accounts</a>
+                            <a class="admin-notification-open" href="<?php echo htmlspecialchars($openUrl); ?>"><?php echo htmlspecialchars($openLabel); ?></a>
                         </article>
                     <?php endforeach; ?>
                 </div>
@@ -855,35 +803,6 @@ include 'includes/header.php';
     <?php include 'includes/footer.php'; ?>
     <?php exit; ?>
     <?php endif; ?>
-
-    <section class="panel notification-panel">
-        <div class="panel-head">
-            <div>
-                <h2>Admin notifications <span class="notification-count"><?php echo $unreadNotificationCount; ?></span></h2>
-                <p>Verified patient accounts created online or from the reception desk QR code.</p>
-            </div>
-            <?php if ($unreadNotificationCount > 0): ?>
-                <form method="post">
-                    <button class="btn secondary" type="submit" name="mark_admin_notifications_read" value="1">Mark all as read</button>
-                </form>
-            <?php endif; ?>
-        </div>
-        <?php if (empty($adminNotifications)): ?>
-            <div class="empty-state">No account notifications yet.</div>
-        <?php else: ?>
-            <div class="notification-list">
-                <?php foreach ($adminNotifications as $notification): ?>
-                    <article class="notification-item <?php echo empty($notification['read_at']) ? 'unread' : ''; ?>">
-                        <strong><?php echo htmlspecialchars($notification['title']); ?></strong>
-                        <p><?php echo htmlspecialchars($notification['message']); ?></p>
-                        <time datetime="<?php echo htmlspecialchars($notification['created_at']); ?>">
-                            <?php echo htmlspecialchars(date('M d, Y g:i A', strtotime($notification['created_at']))); ?>
-                        </time>
-                    </article>
-                <?php endforeach; ?>
-            </div>
-        <?php endif; ?>
-    </section>
 
     <section class="metrics-grid" aria-label="System overview">
         <div class="metric-card">

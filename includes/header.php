@@ -509,8 +509,6 @@ if (isLoggedIn() && in_array((string) ($currentUser['role'] ?? ''), ['receptioni
     }
     body.app-role-patient .nav-label {
         min-width: 0;
-        overflow: hidden;
-        text-overflow: ellipsis;
     }
     .patient-app-topbar {
         display: none;
@@ -598,16 +596,22 @@ if (isLoggedIn() && in_array((string) ($currentUser['role'] ?? ''), ['receptioni
             display: flex;
             align-items: center;
             gap: 14px;
-            min-height: 56px;
-            padding: 9px 14px;
+            min-height: 64px;
+            padding: 10px 14px;
             border-radius: 16px;
             color: #d7e6f2;
             background: transparent;
             border: 1px solid transparent;
-            font-size: 0.98rem;
+            font-size: 0.94rem;
             font-weight: 850;
             text-decoration: none;
-            white-space: nowrap;
+            white-space: normal;
+        }
+        body.app-role-patient nav a .nav-label {
+            overflow: visible;
+            text-overflow: clip;
+            white-space: normal;
+            line-height: 1.22;
         }
         body.app-role-patient nav a:hover {
             transform: none;
@@ -1081,10 +1085,25 @@ if (isLoggedIn() && in_array((string) ($currentUser['role'] ?? ''), ['receptioni
         width: 20px;
         height: 20px;
     }
+    body.app-layout .topbar-calendar-link {
+        text-decoration: none;
+    }
+    body.app-layout .topbar-calendar-link.is-active {
+        background: #eaf8ff;
+        border-color: rgba(0, 119, 182, 0.22);
+        color: #0077b6;
+        box-shadow: 0 10px 24px rgba(0, 119, 182, 0.12);
+    }
     body.app-layout .nav-label {
         min-width: 0;
         overflow: hidden;
         text-overflow: ellipsis;
+    }
+    body.app-layout.app-role-patient .nav-label {
+        overflow: visible;
+        text-overflow: clip;
+        white-space: normal;
+        line-height: 1.18;
     }
     body.app-layout .panel,
     body.app-layout .metric-card,
@@ -1509,6 +1528,21 @@ if (isLoggedIn() && in_array((string) ($currentUser['role'] ?? ''), ['receptioni
             text-decoration: none;
             white-space: nowrap;
         }
+        body.app-layout.app-role-patient nav a {
+            min-height: 68px;
+            padding: 10px 12px;
+            white-space: normal;
+        }
+        body.app-layout.app-role-patient nav a .nav-label {
+            display: block;
+            min-width: 0;
+            overflow: visible;
+            text-overflow: clip;
+            white-space: normal;
+            line-height: 1.18;
+            word-break: normal;
+            overflow-wrap: anywhere;
+        }
         body.app-layout nav a:hover {
             transform: none;
             background: rgba(255, 255, 255, 0.13);
@@ -1713,6 +1747,33 @@ if (isLoggedIn() && in_array((string) ($currentUser['role'] ?? ''), ['receptioni
             text-align: center;
             text-decoration: none;
             white-space: nowrap;
+        }
+        body.app-layout.app-role-patient nav a {
+            min-height: 68px;
+            padding: 10px 12px;
+            white-space: normal;
+        }
+        body.app-layout.app-role-patient nav a .nav-label {
+            display: block;
+            min-width: 0;
+            overflow: visible;
+            text-overflow: clip;
+            white-space: normal;
+            line-height: 1.18;
+            word-break: normal;
+            overflow-wrap: anywhere;
+        }
+        body.app-layout.app-role-patient nav a {
+            min-width: 104px;
+            white-space: normal;
+        }
+        body.app-layout.app-role-patient nav a .nav-label {
+            display: block;
+            max-width: 92px;
+            overflow: visible;
+            text-overflow: clip;
+            white-space: normal;
+            line-height: 1.05;
         }
         body.app-layout .nav-ui-icon {
             width: 26px;
@@ -2160,7 +2221,7 @@ if (isLoggedIn() && in_array((string) ($currentUser['role'] ?? ''), ['receptioni
                 <h1>Globalife Medical Laboratory & Polyclinic</h1>
             </a>
             <?php if (!$headerBrandOnly): ?>
-                <button class="mobile-menu-toggle" onclick="toggleMobileMenu()" aria-label="Open menu">☰</button>
+                <button class="mobile-menu-toggle" onclick="toggleMobileMenu()" aria-label="Open menu">&#9776;</button>
                 <nav id="mainNav" class="<?php echo isLoggedIn() ? 'role-' . htmlspecialchars((string) $currentUser['role']) : 'role-public'; ?>">
                 <?php if (isLoggedIn()): ?>
                     <?php if ($currentUser['role'] === 'admin'): ?>
@@ -2259,11 +2320,11 @@ if (isLoggedIn() && in_array((string) ($currentUser['role'] ?? ''), ['receptioni
                         </a>
                         <a href="book_appointment.php?start=1" class="has-svg-icon <?php echo basename($_SERVER['PHP_SELF']) === 'book_appointment.php' ? 'active' : ''; ?>">
                             <span class="nav-ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M7 3v3M17 3v3M4.5 9h15M6 5h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z"/><path d="M12 12v5M9.5 14.5h5"/></svg></span>
-                            <span class="nav-label">Book</span>
+                            <span class="nav-label">Book Appointments</span>
                         </a>
                         <a href="view_appointments.php" class="has-svg-icon <?php echo basename($_SERVER['PHP_SELF']) === 'view_appointments.php' ? 'active' : ''; ?>">
                             <span class="nav-ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M8 3v3M16 3v3M5 8h14M6 5h12a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z"/><path d="m8.5 14 2 2 5-5"/></svg></span>
-                            <span class="nav-label">Appts</span>
+                            <span class="nav-label">Appointment History</span>
                         </a>
                         <a href="patient_medical_records.php" class="has-svg-icon <?php echo basename($_SERVER['PHP_SELF']) === 'patient_medical_records.php' ? 'active' : ''; ?>">
                             <span class="nav-ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M7 3h7l4 4v14H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"/><path d="M14 3v5h5M8 13h8M8 17h6"/></svg></span>
@@ -2335,6 +2396,8 @@ if (isLoggedIn() && in_array((string) ($currentUser['role'] ?? ''), ['receptioni
             $patientTopbarTitle = 'Clinical Dashboard';
         } elseif ($currentPage === 'receptionist.php') {
             $patientTopbarTitle = 'Reception Desk';
+        } elseif ($currentPage === 'calendar.php') {
+            $patientTopbarTitle = 'Calendar';
         } elseif ($currentPage === 'nurse_patients.php' || $currentPage === 'nurse_patient.php') {
             $patientTopbarTitle = 'Patients';
         } elseif ($currentPage === 'nurse_medical.php') {
@@ -2345,6 +2408,7 @@ if (isLoggedIn() && in_array((string) ($currentUser['role'] ?? ''), ['receptioni
             $patientTopbarTitle = 'Register Patient';
         }
         $topbarRole = (string) ($currentUser['role'] ?? '');
+        $topbarCalendarHref = $topbarRole === 'receptionist' ? 'calendar.php' : '';
         $topbarNotificationsHref = $topbarRole === 'patient'
             ? 'patients.php?notifications=1'
             : ($topbarRole === 'admin' ? 'admin.php?notifications=1' : (in_array($topbarRole, ['receptionist', 'nurse', 'doctor'], true) ? 'clinic_notifications.php' : $patientTopbarDashboardHref));
@@ -2365,6 +2429,11 @@ if (isLoggedIn() && in_array((string) ($currentUser['role'] ?? ''), ['receptioni
             </div>
             <h2><?php echo htmlspecialchars($patientTopbarTitle); ?></h2>
             <div class="patient-topbar-actions">
+                <?php if ($topbarCalendarHref !== ''): ?>
+                    <a href="<?php echo htmlspecialchars($topbarCalendarHref); ?>" class="patient-round-btn topbar-calendar-link<?php echo $currentPage === 'calendar.php' ? ' is-active' : ''; ?>" aria-label="Open clinic calendar" title="Calendar">
+                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3v3M16 3v3M5 8h14M6 5h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z"/><path d="M8 12h3M13 12h3M8 16h3M13 16h3"/></svg>
+                    </a>
+                <?php endif; ?>
                 <div class="patient-notification-wrap<?php echo $headerPatientUnreadNotifications > 0 ? ' has-unread' : ''; ?>" data-notification-menu>
                     <button type="button" class="patient-round-btn" aria-label="Open notifications" aria-haspopup="true" aria-expanded="false" data-notification-menu-button data-has-unread="<?php echo $headerPatientUnreadNotifications > 0 ? '1' : '0'; ?>" data-mark-read-url="<?php echo htmlspecialchars($topbarMarkNotificationsUrl); ?>">
                         <svg viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 7h18s-3 0-3-7"/><path d="M10 20a2 2 0 0 0 4 0"/></svg>

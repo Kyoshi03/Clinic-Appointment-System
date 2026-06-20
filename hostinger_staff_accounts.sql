@@ -37,7 +37,7 @@ DEALLOCATE PREPARE add_is_active_stmt;
 INSERT INTO users (username, password, full_name, role, specialty, email, phone, is_active)
 VALUES
 ('admin', '$2y$10$svkggWd6.aQuKF3sDGSJLON.sqcc4Kfk4kH0PcEGKvcInnR2qftFW', 'Administrator', 'admin', NULL, 'admin@globalife.com', '09123456789', 1),
-('nurse1', '$2y$10$svkggWd6.aQuKF3sDGSJLON.sqcc4Kfk4kH0PcEGKvcInnR2qftFW', 'Dr. Maria Santos', 'nurse', NULL, 'nurse1@globalife.com', '09123456790', 1),
+('nurse1', '$2y$10$svkggWd6.aQuKF3sDGSJLON.sqcc4Kfk4kH0PcEGKvcInnR2qftFW', 'DRA. RODA TEBELIN', 'nurse', NULL, 'nurse1@globalife.com', '09123456790', 1),
 ('receptionist1', '$2y$10$svkggWd6.aQuKF3sDGSJLON.sqcc4Kfk4kH0PcEGKvcInnR2qftFW', 'Receptionist User', 'receptionist', NULL, 'receptionist1@globalife.com', '09123456791', 1),
 ('dr.estrada', '$2y$10$svkggWd6.aQuKF3sDGSJLON.sqcc4Kfk4kH0PcEGKvcInnR2qftFW', 'DR. RYAN CLIFFORD ESTRADA', 'doctor', 'Internist', 'dr.estrada@globalife.local', '', 1),
 ('dra.tebelin', '$2y$10$svkggWd6.aQuKF3sDGSJLON.sqcc4Kfk4kH0PcEGKvcInnR2qftFW', 'DRA. RODA TEBELIN', 'doctor', 'Pediatrician', 'dra.tebelin@globalife.local', '', 1)

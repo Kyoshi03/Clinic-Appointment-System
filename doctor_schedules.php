@@ -4,18 +4,26 @@ checkRole('receptionist');
 
 require_once 'config/database.php';
 require_once __DIR__ . '/includes/patient_profile_photo.php';
+require_once __DIR__ . '/includes/appointment_booking.php';
 
 $currentUser = getCurrentUser();
 
-// Get all doctors (nurses)
+// Get all active doctors
 $conn = getDBConnection();
-$doctorsQuery = "SELECT id, full_name, email, phone FROM users WHERE role = 'nurse' ORDER BY full_name";
+$doctorsQuery = "SELECT id, full_name, email, phone FROM users WHERE role = 'doctor' AND COALESCE(is_active, 1) = 1 ORDER BY full_name";
 $doctors = $conn->query($doctorsQuery)->fetch_all(MYSQLI_ASSOC);
 
 // Get appointments for each doctor
 $doctorAppointments = [];
 foreach ($doctors as $doctor) {
-    $stmt = $conn->prepare("SELECT a.*, p.full_name as patient_name, p.profile_photo, p.profile_updated_at FROM appointments a JOIN users p ON a.patient_id = p.id WHERE a.doctor_id = ? AND a.status IN ('pending', 'confirmed') ORDER BY a.appointment_date ASC, a.appointment_time ASC");
+    $stmt = $conn->prepare("SELECT a.*, p.full_name as patient_name, p.profile_photo, p.profile_updated_at
+        FROM appointments a
+        JOIN users p ON a.patient_id = p.id
+        WHERE a.doctor_id = ?
+          AND a.booking_type = 'consultation'
+          AND a.status IN ('pending', 'confirmed')
+          AND a.appointment_date >= CURDATE()
+        ORDER BY a.appointment_date ASC, a.appointment_time ASC");
     $stmt->bind_param("i", $doctor['id']);
     $stmt->execute();
     $appointments = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
@@ -23,6 +31,7 @@ foreach ($doctors as $doctor) {
     $stmt->close();
 }
 $conn->close();
+$doctorDailyLimit = appointment_doctor_daily_limit();
 
 $pageTitle = "Doctor Schedules | Globalife Medical Laboratory & Polyclinic";
 $additionalStyles = patientAvatarStyles() . '
@@ -114,6 +123,45 @@ $additionalStyles = patientAvatarStyles() . '
     .appointments-list {
         display: grid;
         gap: 12px;
+    }
+    .daily-capacity-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+        gap: 10px;
+        margin: 0 0 18px;
+    }
+    .daily-capacity-card {
+        padding: 14px 15px;
+        border: 1px solid #cfe3ef;
+        border-radius: 12px;
+        background: #f7fcff;
+    }
+    .daily-capacity-card.full {
+        border-color: #efc2c8;
+        background: #fff5f6;
+    }
+    .daily-capacity-card strong {
+        display: block;
+        color: #073b4c;
+        margin-bottom: 5px;
+    }
+    .daily-capacity-card span {
+        display: block;
+        color: #60727d;
+        font-size: .84rem;
+    }
+    .daily-capacity-card b {
+        display: inline-block;
+        margin-top: 8px;
+        padding: 5px 9px;
+        border-radius: 999px;
+        background: #e8f8ef;
+        color: #17643a;
+        font-size: .75rem;
+    }
+    .daily-capacity-card.full b {
+        background: #ffe1e5;
+        color: #a61b2b;
     }
     .appointment-schedule-item {
         background: linear-gradient(135deg, #f8f9fa 0%, #ffffff 100%);
@@ -225,6 +273,11 @@ include 'includes/header.php';
             <?php foreach ($doctors as $doctor): ?>
                 <?php
                 $appointments = $doctorAppointments[$doctor['id']] ?? [];
+                $dailyCounts = [];
+                foreach ($appointments as $appointment) {
+                    $dateKey = (string) $appointment['appointment_date'];
+                    $dailyCounts[$dateKey] = ($dailyCounts[$dateKey] ?? 0) + 1;
+                }
                 $initial = strtoupper(substr($doctor['full_name'], 0, 1));
                 ?>
                 <div class="doctor-card">
@@ -245,6 +298,18 @@ include 'includes/header.php';
                         <div class="schedule-title">
                             Upcoming Appointments (<?php echo count($appointments); ?>)
                         </div>
+                        <?php if (!empty($dailyCounts)): ?>
+                            <div class="daily-capacity-grid">
+                                <?php foreach ($dailyCounts as $dateKey => $dailyCount): ?>
+                                    <?php $isFull = $dailyCount >= $doctorDailyLimit; ?>
+                                    <div class="daily-capacity-card<?php echo $isFull ? ' full' : ''; ?>">
+                                        <strong><?php echo htmlspecialchars(date('M d, Y', strtotime($dateKey))); ?></strong>
+                                        <span><?php echo $dailyCount; ?> of <?php echo $doctorDailyLimit; ?> appointments</span>
+                                        <b><?php echo $isFull ? 'Fully booked' : ($doctorDailyLimit - $dailyCount) . ' remaining'; ?></b>
+                                    </div>
+                                <?php endforeach; ?>
+                            </div>
+                        <?php endif; ?>
                         
                         <?php if (empty($appointments)): ?>
                             <div class="empty-schedule">
@@ -286,4 +351,3 @@ include 'includes/header.php';
 </div>
 
 <?php include 'includes/footer.php'; ?>
-

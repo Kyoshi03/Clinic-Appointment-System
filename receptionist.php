@@ -11,6 +11,18 @@ $pageTitle = 'Receptionist Dashboard | Globalife Medical Laboratory & Polyclinic
 $currentUser = getCurrentUser();
 $allowedStatuses = ['pending', 'confirmed', 'completed', 'cancelled'];
 
+if ($_SERVER['REQUEST_METHOD'] === 'GET' && (isset($_GET['calendar']) || isset($_GET['calendar_month']) || isset($_GET['calendar_date']) || isset($_GET['calendar_view']))) {
+    $calendarQuery = [];
+    foreach (['calendar_month', 'calendar_date', 'calendar_view'] as $calendarKey) {
+        if (isset($_GET[$calendarKey]) && trim((string) $_GET[$calendarKey]) !== '') {
+            $calendarQuery[$calendarKey] = trim((string) $_GET[$calendarKey]);
+        }
+    }
+    $calendarLocation = 'calendar.php' . (!empty($calendarQuery) ? '?' . http_build_query($calendarQuery) : '');
+    header('Location: ' . $calendarLocation);
+    exit;
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_status'])) {
     $appointmentId = (int) ($_POST['appointment_id'] ?? 0);
     $newStatus = strtolower(trim((string) ($_POST['status'] ?? '')));
@@ -33,6 +45,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_status'])) {
             if ($newStatus !== $oldStatus) {
                 create_patient_appointment_notification($conn, $appointmentId, $newStatus);
                 create_clinic_appointment_notification($conn, $appointmentId, $newStatus);
+                create_admin_appointment_notification($conn, $appointmentId, $newStatus);
             }
             if ($newStatus === 'confirmed' && $oldStatus !== 'confirmed') {
                 $emailResult = appointment_send_clinic_confirmation_email($conn, $appointmentId);
@@ -148,6 +161,36 @@ function receptionist_short_text(string $text, int $limit = 70): string {
     return strlen($text) > $limit ? substr($text, 0, $limit) . '...' : $text;
 }
 
+function receptionist_calendar_service_label(array $appointment): string {
+    $bookingType = strtolower((string) ($appointment['booking_type'] ?? ''));
+    if ($bookingType === 'consultation') {
+        return 'Doctor consultation';
+    }
+    if ($bookingType === 'package') {
+        return 'Laboratory package';
+    }
+    if ($bookingType === 'individual') {
+        return 'Laboratory tests';
+    }
+
+    $notes = trim((string) ($appointment['notes'] ?? ''));
+    if (preg_match('/Services:\s*(.*?)(?:\s*\|\s*(?:Channel:|(?:Est\.\s*)?Total:)|\s*$)/i', $notes, $matches)) {
+        $service = trim($matches[1]);
+        if ($service !== '') {
+            return receptionist_short_text($service, 42);
+        }
+    }
+
+    return 'Clinic appointment';
+}
+
+function receptionist_calendar_status_label(string $status): string {
+    if ($status === 'cancelled') {
+        return 'Declined';
+    }
+    return receptionist_status_label($status);
+}
+
 $conn = getDBConnection();
 init_doctor_schema_and_accounts($conn);
 $today = date('Y-m-d');
@@ -220,6 +263,62 @@ $totalToday = count($todayAppointments);
 $activeQueue = $statusTotals['pending'] + $statusTotals['confirmed'];
 $readyQueue = $statusTotals['confirmed'];
 $todayLabel = date('F d, Y');
+$showReceptionCalendar = isset($_GET['calendar']) || isset($_GET['calendar_month']) || isset($_GET['calendar_date']);
+
+$calendarMonthParam = trim((string) ($_GET['calendar_month'] ?? ''));
+if (!preg_match('/^\d{4}-\d{2}$/', $calendarMonthParam)) {
+    $calendarMonthParam = date('Y-m');
+}
+$calendarMonth = DateTimeImmutable::createFromFormat('!Y-m-d', $calendarMonthParam . '-01') ?: new DateTimeImmutable('first day of this month');
+$calendarMonthStart = $calendarMonth->modify('first day of this month');
+$calendarMonthEnd = $calendarMonth->modify('last day of this month');
+$calendarGridStart = $calendarMonthStart->modify('-' . (int) $calendarMonthStart->format('w') . ' days');
+$calendarGridEnd = $calendarMonthEnd->modify('+' . (6 - (int) $calendarMonthEnd->format('w')) . ' days');
+$calendarSelectedDate = trim((string) ($_GET['calendar_date'] ?? $today));
+if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $calendarSelectedDate)) {
+    $calendarSelectedDate = $today;
+}
+$calendarSelected = DateTimeImmutable::createFromFormat('!Y-m-d', $calendarSelectedDate) ?: new DateTimeImmutable($today);
+$calendarPreviousMonthUrl = 'receptionist.php?calendar=1&calendar_month=' . $calendarMonthStart->modify('-1 month')->format('Y-m') . '#reception-calendar';
+$calendarNextMonthUrl = 'receptionist.php?calendar=1&calendar_month=' . $calendarMonthStart->modify('+1 month')->format('Y-m') . '#reception-calendar';
+$appointmentsByDate = [];
+foreach ($todayAppointments as $appointment) {
+    $dateKey = (string) ($appointment['appointment_date'] ?? '');
+    if ($dateKey === '') {
+        continue;
+    }
+    $appointmentsByDate[$dateKey][] = $appointment;
+}
+foreach ($appointmentsByDate as &$dateAppointments) {
+    usort($dateAppointments, function (array $a, array $b): int {
+        return strcmp((string) ($a['appointment_time'] ?? ''), (string) ($b['appointment_time'] ?? ''));
+    });
+}
+unset($dateAppointments);
+$calendarDays = [];
+for ($cursor = $calendarGridStart; $cursor <= $calendarGridEnd; $cursor = $cursor->modify('+1 day')) {
+    $dateKey = $cursor->format('Y-m-d');
+    $calendarDays[] = [
+        'date' => $dateKey,
+        'day' => $cursor,
+        'appointments' => $appointmentsByDate[$dateKey] ?? [],
+        'outside_month' => $cursor->format('m') !== $calendarMonthStart->format('m'),
+        'is_today' => $dateKey === $today,
+    ];
+}
+$calendarWeekStart = $calendarSelected->modify('-' . (int) $calendarSelected->format('w') . ' days');
+$calendarWeekDays = [];
+for ($i = 0; $i < 7; $i++) {
+    $weekDay = $calendarWeekStart->modify('+' . $i . ' days');
+    $dateKey = $weekDay->format('Y-m-d');
+    $calendarWeekDays[] = [
+        'date' => $dateKey,
+        'day' => $weekDay,
+        'appointments' => $appointmentsByDate[$dateKey] ?? [],
+        'is_today' => $dateKey === $today,
+    ];
+}
+$calendarDayAppointments = $appointmentsByDate[$calendarSelected->format('Y-m-d')] ?? [];
 
 $additionalStyles = patientAvatarStyles() . '
 body {
@@ -230,7 +329,7 @@ body {
 .receptionist-dashboard {
     max-width: 1180px;
     margin: 0 auto;
-    padding: 28px 20px 46px;
+    padding: 24px 20px 46px;
 }
 
 .receptionist-dashboard > section {
@@ -241,35 +340,51 @@ body {
 .desk-hero {
     display: grid;
     grid-template-columns: minmax(0, 1fr) 260px;
-    gap: 18px;
+    gap: 14px;
     align-items: stretch;
-    margin-bottom: 16px;
+    margin-bottom: 14px;
 }
 
 .hero-main,
 .hero-side,
 .metric-card,
 .panel,
-.appointment-row {
-    border: 1px solid #dce8ef;
-    border-radius: 8px;
+.appointment-row,
+.reception-flow-card {
+    border: 1px solid #d7e8f2;
+    border-radius: 14px;
     background: #fff;
-    box-shadow: 0 10px 24px rgba(25, 76, 110, 0.06);
+    box-shadow: 0 14px 34px rgba(25, 76, 110, 0.08);
 }
 
 .hero-main {
-    background: #073b4c;
+    position: relative;
+    overflow: hidden;
+    background:
+        radial-gradient(circle at 92% 18%, rgba(65, 190, 222, 0.2), transparent 28%),
+        linear-gradient(135deg, #06465a 0%, #075f92 55%, #0b4f80 100%);
     color: #fff;
-    padding: 26px;
+    padding: 28px;
     display: flex;
     flex-direction: column;
     justify-content: center;
 }
 
+.hero-main::after {
+    content: "";
+    position: absolute;
+    right: -44px;
+    bottom: -78px;
+    width: 220px;
+    height: 220px;
+    border: 38px solid rgba(255, 255, 255, 0.08);
+    border-radius: 50%;
+}
+
 .eyebrow {
     margin: 0 0 8px;
-    color: #8bd3e6;
-    font-size: 0.78rem;
+    color: #aeefff;
+    font-size: 0.8rem;
     font-weight: 900;
     letter-spacing: 0;
     text-transform: uppercase;
@@ -278,22 +393,23 @@ body {
 .hero-main h1 {
     margin: 0 0 10px;
     color: #fff;
-    font-size: 2rem;
+    font-size: clamp(1.65rem, 3vw, 2.2rem);
     line-height: 1.15;
 }
 
 .hero-main p {
+    max-width: 720px;
     margin: 0;
-    color: rgba(255, 255, 255, 0.82);
+    color: rgba(255, 255, 255, 0.88);
     line-height: 1.6;
 }
 
 .hero-side {
-    padding: 20px;
+    padding: 22px;
     display: grid;
-    gap: 12px;
+    gap: 10px;
     align-content: center;
-    background: #f8fcff;
+    background: linear-gradient(180deg, #ffffff 0%, #f2f9fd 100%);
 }
 
 .hero-side span {
@@ -338,13 +454,26 @@ body {
     display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 12px;
-    margin-bottom: 16px;
+    margin-bottom: 14px;
 }
 
 .metric-card {
-    padding: 16px;
+    position: relative;
+    overflow: hidden;
+    padding: 18px;
     display: grid;
-    gap: 6px;
+    gap: 7px;
+}
+
+.metric-card::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 16px;
+    bottom: 16px;
+    width: 4px;
+    border-radius: 0 999px 999px 0;
+    background: #0f7cc2;
 }
 
 .metric-card span {
@@ -356,7 +485,7 @@ body {
 
 .metric-card strong {
     color: #073b4c;
-    font-size: 1.85rem;
+    font-size: 2rem;
     line-height: 1;
 }
 
@@ -370,20 +499,69 @@ body {
     background: #fffaf0;
 }
 
+.metric-card.pending::before {
+    background: #e3a31a;
+}
+
 .metric-card.ready {
     border-color: #bfe6ce;
     background: #f5fbf7;
 }
 
+.metric-card.ready::before {
+    background: #1f9d61;
+}
+
+.reception-flow {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px;
+    margin-bottom: 14px;
+}
+
+.reception-flow-card {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 12px;
+    align-items: center;
+    padding: 14px;
+    background: linear-gradient(180deg, #ffffff 0%, #f8fcff 100%);
+}
+
+.flow-number {
+    width: 38px;
+    height: 38px;
+    display: inline-grid;
+    place-items: center;
+    border-radius: 12px;
+    background: #e5f5fd;
+    color: #0f7cc2;
+    font-weight: 950;
+}
+
+.reception-flow-card strong {
+    display: block;
+    color: #073b4c;
+    font-size: 0.98rem;
+}
+
+.reception-flow-card span {
+    display: block;
+    margin-top: 3px;
+    color: #60727d;
+    font-size: 0.86rem;
+    line-height: 1.35;
+}
+
 .workbench-grid {
     display: grid;
     grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.05fr);
-    gap: 16px;
-    margin-bottom: 16px;
+    gap: 14px;
+    margin-bottom: 14px;
 }
 
 .panel {
-    padding: 20px;
+    padding: 18px;
 }
 
 .panel-head {
@@ -678,6 +856,326 @@ select:focus {
     flex-wrap: wrap;
     justify-content: flex-end;
     gap: 8px;
+}
+
+.reception-calendar {
+    margin-bottom: 16px;
+    padding: 18px;
+    overflow: hidden;
+}
+
+.calendar-topline {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    margin-bottom: 16px;
+}
+
+.calendar-title h2 {
+    margin: 0;
+    color: #073b4c;
+    font-size: 1.3rem;
+}
+
+.calendar-title p {
+    margin: 4px 0 0;
+    color: #60727d;
+    font-size: 0.92rem;
+}
+
+.calendar-view-tabs {
+    display: inline-flex;
+    gap: 6px;
+    padding: 5px;
+    border: 1px solid #d9e8f1;
+    border-radius: 999px;
+    background: #f8fbff;
+}
+
+.calendar-tab {
+    min-height: 34px;
+    border: 0;
+    border-radius: 999px;
+    background: transparent;
+    color: #315b6d;
+    padding: 6px 14px;
+    font: inherit;
+    font-size: 0.86rem;
+    font-weight: 900;
+    cursor: pointer;
+}
+
+.calendar-tab.active {
+    background: #0f7cc2;
+    color: #fff;
+    box-shadow: 0 10px 22px rgba(15, 124, 194, 0.22);
+}
+
+.calendar-control-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 14px;
+}
+
+.calendar-month-nav {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.calendar-month-nav a,
+.calendar-today-link {
+    display: inline-grid;
+    place-items: center;
+    min-width: 38px;
+    min-height: 38px;
+    border: 1px solid #d7e8f2;
+    border-radius: 999px;
+    background: #f8fbff;
+    color: #0b4f80;
+    font-weight: 900;
+    text-decoration: none;
+}
+
+.calendar-month-label {
+    color: #073b4c;
+    font-size: 1rem;
+    font-weight: 900;
+}
+
+.calendar-legend {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 8px;
+}
+
+.calendar-legend span {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    min-height: 30px;
+    border: 1px solid #dceaf1;
+    border-radius: 999px;
+    background: #fff;
+    color: #47606d;
+    padding: 5px 11px;
+    font-size: 0.8rem;
+    font-weight: 900;
+}
+
+.calendar-legend i {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+}
+
+.dot-pending { background: #e3a31a; }
+.dot-confirmed { background: #0f7cc2; }
+.dot-completed { background: #1f9d61; }
+.dot-cancelled { background: #d94150; }
+
+.calendar-view {
+    display: none;
+}
+
+.calendar-view.active {
+    display: block;
+}
+
+.calendar-scroll {
+    overflow-x: auto;
+    padding-bottom: 4px;
+}
+
+.month-grid {
+    display: grid;
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+    border: 1px solid #dbe8f0;
+    border-radius: 16px;
+    overflow: hidden;
+    background: #dbe8f0;
+    gap: 1px;
+}
+
+.month-weekday {
+    min-height: 36px;
+    display: grid;
+    place-items: center;
+    background: #f3f8fb;
+    color: #60727d;
+    font-size: 0.76rem;
+    font-weight: 900;
+    text-transform: uppercase;
+}
+
+.month-day {
+    min-height: 124px;
+    background: #fff;
+    padding: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+}
+
+.month-day.outside-month {
+    background: #f4f8fb;
+    color: #9aaab3;
+}
+
+.day-number {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    color: #073b4c;
+    font-weight: 900;
+    font-size: 0.9rem;
+}
+
+.month-day.is-today .day-number {
+    background: #dff4ff;
+    color: #0077b6;
+}
+
+.calendar-event {
+    display: block;
+    border: 1px solid #cfe4f1;
+    border-left-width: 4px;
+    border-radius: 10px;
+    background: #f8fcff;
+    color: #123244;
+    padding: 7px 8px;
+    text-decoration: none;
+    box-shadow: 0 6px 14px rgba(25, 76, 110, 0.04);
+}
+
+.calendar-event strong {
+    display: block;
+    overflow: hidden;
+    color: #073b4c;
+    font-size: 0.78rem;
+    line-height: 1.2;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.calendar-event span {
+    display: block;
+    margin-top: 3px;
+    overflow: hidden;
+    color: #60727d;
+    font-size: 0.68rem;
+    font-weight: 800;
+    line-height: 1.2;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.calendar-event.pending { border-left-color: #e3a31a; background: #fffaf0; }
+.calendar-event.confirmed { border-left-color: #0f7cc2; background: #eef8ff; }
+.calendar-event.completed { border-left-color: #1f9d61; background: #f0fbf5; }
+.calendar-event.cancelled { border-left-color: #d94150; background: #fff4f5; }
+
+.calendar-more {
+    color: #60727d;
+    font-size: 0.74rem;
+    font-weight: 900;
+}
+
+.week-grid,
+.day-timeline {
+    display: grid;
+    gap: 10px;
+}
+
+.week-grid {
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+
+.week-day-card,
+.day-appointment-card {
+    border: 1px solid #dce8ef;
+    border-radius: 14px;
+    background: #fff;
+    box-shadow: 0 10px 24px rgba(25, 76, 110, 0.05);
+}
+
+.week-day-card {
+    min-height: 170px;
+    padding: 12px;
+}
+
+.week-day-card.is-today {
+    border-color: #9bdcf3;
+    background: #f6fcff;
+}
+
+.week-day-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 10px;
+}
+
+.week-day-head strong {
+    color: #073b4c;
+}
+
+.week-day-head span {
+    color: #60727d;
+    font-size: 0.78rem;
+    font-weight: 900;
+}
+
+.day-timeline {
+    max-width: 760px;
+}
+
+.day-appointment-card {
+    display: grid;
+    grid-template-columns: 96px minmax(0, 1fr) auto;
+    gap: 14px;
+    align-items: center;
+    padding: 14px;
+}
+
+.day-time {
+    border-radius: 12px;
+    background: #eef8ff;
+    color: #0b4f80;
+    padding: 10px;
+    text-align: center;
+    font-weight: 900;
+}
+
+.day-info strong {
+    display: block;
+    color: #073b4c;
+    font-size: 1rem;
+}
+
+.day-info span {
+    display: block;
+    margin-top: 4px;
+    color: #60727d;
+    font-size: 0.9rem;
+}
+
+.calendar-empty {
+    border: 1px dashed #bdd7ea;
+    border-radius: 12px;
+    background: #f8fbff;
+    color: #60727d;
+    padding: 18px;
+    font-weight: 800;
+    text-align: center;
 }
 
 .btn-action,
@@ -1024,6 +1522,7 @@ body.modal-open {
 @media (max-width: 980px) {
     .desk-hero,
     .workbench-grid,
+    .reception-flow,
     .metrics-grid {
         grid-template-columns: repeat(2, minmax(0, 1fr));
     }
@@ -1040,11 +1539,28 @@ body.modal-open {
 
     .desk-hero,
     .workbench-grid,
+    .reception-flow,
     .metrics-grid,
     .appointment-toolbar,
     .detail-grid,
     .staff-strip {
         grid-template-columns: 1fr;
+    }
+
+    .hero-main,
+    .hero-side,
+    .metric-card,
+    .panel,
+    .reception-flow-card {
+        border-radius: 12px;
+    }
+
+    .hero-main {
+        padding: 22px;
+    }
+
+    .reception-flow-card {
+        align-items: flex-start;
     }
 
     .appointment-row {
@@ -1054,6 +1570,40 @@ body.modal-open {
 
     .appointment-actions {
         justify-content: stretch;
+    }
+
+    .calendar-topline,
+    .calendar-control-row {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .calendar-view-tabs {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        width: 100%;
+        box-sizing: border-box;
+    }
+
+    .calendar-tab {
+        width: 100%;
+    }
+
+    .calendar-legend {
+        justify-content: flex-start;
+    }
+
+    .month-grid {
+        min-width: 760px;
+    }
+
+    .week-grid,
+    .day-appointment-card {
+        grid-template-columns: 1fr;
+    }
+
+    .day-appointment-card {
+        align-items: stretch;
     }
 
     .btn-action,
@@ -1127,6 +1677,137 @@ include 'includes/header.php';
             <small><?php echo $activeQueue; ?> still active</small>
         </div>
     </section>
+
+    <section class="reception-flow" aria-label="Reception workflow">
+        <div class="reception-flow-card">
+            <span class="flow-number">1</span>
+            <div>
+                <strong>Review requests</strong>
+                <span>Check pending appointments before the clinic flow starts.</span>
+            </div>
+        </div>
+        <div class="reception-flow-card">
+            <span class="flow-number">2</span>
+            <div>
+                <strong>Confirm arrivals</strong>
+                <span>Move verified patients to the nurse or doctor queue.</span>
+            </div>
+        </div>
+        <div class="reception-flow-card">
+            <span class="flow-number">3</span>
+            <div>
+                <strong>Update status</strong>
+                <span>Mark visits completed or declined after front desk review.</span>
+            </div>
+        </div>
+    </section>
+
+    <?php if ($showReceptionCalendar): ?>
+    <section class="panel reception-calendar" id="reception-calendar" aria-label="Reception calendar">
+        <div class="calendar-topline">
+            <div class="calendar-title">
+                <h2>Clinic appointment calendar</h2>
+                <p>View patient bookings by day, week, or month.</p>
+            </div>
+            <div class="calendar-view-tabs" role="tablist" aria-label="Calendar view">
+                <button type="button" class="calendar-tab" data-calendar-tab="day">Day</button>
+                <button type="button" class="calendar-tab" data-calendar-tab="week">Week</button>
+                <button type="button" class="calendar-tab active" data-calendar-tab="month">Month</button>
+            </div>
+        </div>
+
+        <div class="calendar-control-row">
+            <div class="calendar-month-nav" aria-label="Month navigation">
+                <a href="<?php echo htmlspecialchars($calendarPreviousMonthUrl); ?>" aria-label="Previous month">&larr;</a>
+                <strong class="calendar-month-label"><?php echo htmlspecialchars($calendarMonthStart->format('F Y')); ?></strong>
+                <a href="<?php echo htmlspecialchars($calendarNextMonthUrl); ?>" aria-label="Next month">&rarr;</a>
+                <a class="calendar-today-link" href="receptionist.php?calendar=1#reception-calendar">Today</a>
+            </div>
+            <div class="calendar-legend" aria-label="Appointment status legend">
+                <span><i class="dot-pending"></i> Pending</span>
+                <span><i class="dot-confirmed"></i> Confirmed</span>
+                <span><i class="dot-completed"></i> Completed</span>
+                <span><i class="dot-cancelled"></i> Declined</span>
+            </div>
+        </div>
+
+        <div class="calendar-view" data-calendar-view="day">
+            <div class="calendar-title" style="margin-bottom:12px">
+                <h2><?php echo htmlspecialchars($calendarSelected->format('F d, Y')); ?></h2>
+                <p><?php echo count($calendarDayAppointments); ?> appointment<?php echo count($calendarDayAppointments) === 1 ? '' : 's'; ?> scheduled.</p>
+            </div>
+            <?php if (empty($calendarDayAppointments)): ?>
+                <div class="calendar-empty">No appointments scheduled for this day.</div>
+            <?php else: ?>
+                <div class="day-timeline">
+                    <?php foreach ($calendarDayAppointments as $appointment): ?>
+                        <?php $calendarStatus = receptionist_status($appointment); ?>
+                        <a class="day-appointment-card calendar-event <?php echo htmlspecialchars($calendarStatus); ?>" href="view_appointments.php?highlight=<?php echo (int) ($appointment['id'] ?? 0); ?>">
+                            <span class="day-time"><?php echo receptionist_time_label($appointment['appointment_time']); ?></span>
+                            <span class="day-info">
+                                <strong><?php echo htmlspecialchars($appointment['patient_name'] ?? 'Patient'); ?></strong>
+                                <span><?php echo htmlspecialchars(receptionist_calendar_service_label($appointment)); ?><?php echo !empty($appointment['doctor_name']) ? ' | ' . htmlspecialchars((string) $appointment['doctor_name']) : ''; ?></span>
+                            </span>
+                            <span class="status-badge <?php echo htmlspecialchars($calendarStatus); ?>"><?php echo htmlspecialchars(receptionist_calendar_status_label($calendarStatus)); ?></span>
+                        </a>
+                    <?php endforeach; ?>
+                </div>
+            <?php endif; ?>
+        </div>
+
+        <div class="calendar-view" data-calendar-view="week">
+            <div class="week-grid">
+                <?php foreach ($calendarWeekDays as $weekDay): ?>
+                    <div class="week-day-card <?php echo $weekDay['is_today'] ? 'is-today' : ''; ?>">
+                        <div class="week-day-head">
+                            <strong><?php echo htmlspecialchars($weekDay['day']->format('D')); ?></strong>
+                            <span><?php echo htmlspecialchars($weekDay['day']->format('M j')); ?></span>
+                        </div>
+                        <?php if (empty($weekDay['appointments'])): ?>
+                            <div class="calendar-empty">No bookings</div>
+                        <?php else: ?>
+                            <?php foreach (array_slice($weekDay['appointments'], 0, 4) as $appointment): ?>
+                                <?php $calendarStatus = receptionist_status($appointment); ?>
+                                <a class="calendar-event <?php echo htmlspecialchars($calendarStatus); ?>" href="view_appointments.php?highlight=<?php echo (int) ($appointment['id'] ?? 0); ?>">
+                                    <strong><?php echo htmlspecialchars($appointment['patient_name'] ?? 'Patient'); ?></strong>
+                                    <span><?php echo receptionist_time_label($appointment['appointment_time']); ?> | <?php echo htmlspecialchars(receptionist_calendar_status_label($calendarStatus)); ?></span>
+                                </a>
+                            <?php endforeach; ?>
+                            <?php if (count($weekDay['appointments']) > 4): ?>
+                                <div class="calendar-more">+<?php echo count($weekDay['appointments']) - 4; ?> more</div>
+                            <?php endif; ?>
+                        <?php endif; ?>
+                    </div>
+                <?php endforeach; ?>
+            </div>
+        </div>
+
+        <div class="calendar-view active" data-calendar-view="month">
+            <div class="calendar-scroll">
+                <div class="month-grid">
+                    <?php foreach (['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as $weekday): ?>
+                        <div class="month-weekday"><?php echo htmlspecialchars($weekday); ?></div>
+                    <?php endforeach; ?>
+                    <?php foreach ($calendarDays as $calendarDay): ?>
+                        <div class="month-day <?php echo $calendarDay['outside_month'] ? 'outside-month' : ''; ?> <?php echo $calendarDay['is_today'] ? 'is-today' : ''; ?>">
+                            <span class="day-number"><?php echo htmlspecialchars($calendarDay['day']->format('j')); ?></span>
+                            <?php foreach (array_slice($calendarDay['appointments'], 0, 3) as $appointment): ?>
+                                <?php $calendarStatus = receptionist_status($appointment); ?>
+                                <a class="calendar-event <?php echo htmlspecialchars($calendarStatus); ?>" href="view_appointments.php?highlight=<?php echo (int) ($appointment['id'] ?? 0); ?>" title="<?php echo htmlspecialchars(($appointment['patient_name'] ?? 'Patient') . ' - ' . receptionist_time_label($appointment['appointment_time'])); ?>">
+                                    <strong><?php echo htmlspecialchars($appointment['patient_name'] ?? 'Patient'); ?></strong>
+                                    <span><?php echo receptionist_time_label($appointment['appointment_time']); ?> | <?php echo htmlspecialchars(receptionist_calendar_status_label($calendarStatus)); ?></span>
+                                </a>
+                            <?php endforeach; ?>
+                            <?php if (count($calendarDay['appointments']) > 3): ?>
+                                <div class="calendar-more">+<?php echo count($calendarDay['appointments']) - 3; ?> more</div>
+                            <?php endif; ?>
+                        </div>
+                    <?php endforeach; ?>
+                </div>
+            </div>
+        </div>
+    </section>
+    <?php endif; ?>
 
     <section class="workbench-grid">
         <div class="panel">
@@ -1219,5 +1900,35 @@ include 'includes/header.php';
     </section>
 
 </main>
+
+<script>
+(function () {
+    const tabs = document.querySelectorAll('[data-calendar-tab]');
+    const views = document.querySelectorAll('[data-calendar-view]');
+    if (!tabs.length || !views.length) {
+        return;
+    }
+
+    function showCalendarView(viewName) {
+        tabs.forEach(function (tab) {
+            tab.classList.toggle('active', tab.getAttribute('data-calendar-tab') === viewName);
+        });
+        views.forEach(function (view) {
+            view.classList.toggle('active', view.getAttribute('data-calendar-view') === viewName);
+        });
+    }
+
+    tabs.forEach(function (tab) {
+        tab.addEventListener('click', function () {
+            showCalendarView(tab.getAttribute('data-calendar-tab') || 'month');
+        });
+    });
+
+    const requestedView = new URLSearchParams(window.location.search).get('calendar_view');
+    if (requestedView && ['day', 'week', 'month'].includes(requestedView)) {
+        showCalendarView(requestedView);
+    }
+})();
+</script>
 
 <?php include 'includes/footer.php'; ?>
