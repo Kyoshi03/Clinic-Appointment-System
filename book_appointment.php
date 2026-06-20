@@ -142,6 +142,20 @@ function serviceUnitPrice(array $svc, string $channel): float {
     return (float) $svc['opd_price'];
 }
 
+function consultationDoctorDirectory(): array {
+    return [
+        ['full_name' => 'Dra. Vunelyn Encina', 'specialty' => 'Clinic Doctor'],
+        ['full_name' => 'Dra. Enely Casas', 'specialty' => 'Clinic Doctor'],
+        ['full_name' => 'Dra. Marlin Mojica', 'specialty' => 'Clinic Doctor'],
+        ['full_name' => 'Dra. Roda Tebelin', 'specialty' => 'Clinic Doctor'],
+        ['full_name' => 'Dra. Michelle Aberia', 'specialty' => 'Clinic Doctor'],
+    ];
+}
+
+function consultationDoctorNameKey(string $name): string {
+    return strtolower((string) preg_replace('/\s+/', ' ', trim($name)));
+}
+
 function bookingAutomaticTime(mysqli $conn, array $booking, string $date): string {
     $dayOfWeek = (int) date('N', strtotime($date));
     $windows = [];
@@ -214,16 +228,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if ($action === 'choose_services') {
         if ($bk['type'] === 'consultation') {
-            $doctorId = (int) ($_POST['doctor_id'] ?? 0);
-            if ($doctorId <= 0 || !doctor_user_is_active($conn, $doctorId)) {
-                $error = 'Please choose an available doctor.';
-            } else {
-                $bk['doctor_id'] = $doctorId;
-                $bk['service_ids'] = [];
-                $bk['step'] = 3;
-                header('Location: book_appointment.php');
-                exit;
-            }
+            $bk['doctor_id'] = null;
+            $bk['service_ids'] = [];
+            $bk['step'] = 3;
+            header('Location: book_appointment.php');
+            exit;
         } elseif ($bk['type'] === 'package') {
             $pid = (int) ($_POST['package_id'] ?? 0);
             if ($pid <= 0) {
@@ -264,11 +273,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $bk['doctor_id'] = null;
         }
         if ($bk['type'] !== 'consultation' && empty($bk['service_ids'])) {
-            $bk['step'] = 2;
-            header('Location: book_appointment.php');
-            exit;
-        }
-        if ($bk['type'] === 'consultation' && empty($bk['doctor_id'])) {
             $bk['step'] = 2;
             header('Location: book_appointment.php');
             exit;
@@ -317,6 +321,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $error = 'There is no remaining availability on the selected date. Please choose another date.';
             } elseif (
                 $bk['type'] === 'consultation'
+                && !empty($bk['doctor_id'])
                 && appointment_doctor_day_capacity($conn, (int) $bk['doctor_id'], $d)['is_full']
             ) {
                 $capacity = appointment_doctor_day_capacity($conn, (int) $bk['doctor_id'], $d);
@@ -333,6 +338,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             } else {
                 if (
                     $bk['type'] === 'consultation'
+                    && !empty($bk['doctor_id'])
                     && !user_is_doctor_available_at($conn, (int) $bk['doctor_id'], $d, $t)
                 ) {
                     $error = 'Choose a date within the selected doctor\'s clinic schedule.';
@@ -356,7 +362,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $verificationChannel = 'email';
         }
         $hasBookingSelection = $bk['type'] === 'consultation'
-            ? !empty($bk['doctor_id'])
+            ? true
             : !empty($bk['service_ids']);
         if ($bk['step'] < 5 || !$hasBookingSelection || $bk['type'] === null) {
             $bk['step'] = 1;
@@ -374,7 +380,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 [
                     'type' => $bk['type'],
                     'service_ids' => $bk['service_ids'],
-                    'doctor_id' => $bk['type'] === 'consultation' ? (int) $bk['doctor_id'] : null,
+                    'doctor_id' => $bk['type'] === 'consultation' && !empty($bk['doctor_id']) ? (int) $bk['doctor_id'] : null,
                     'price_channel' => $bk['price_channel'],
                     'appointment_date' => $bk['appointment_date'],
                     'appointment_time' => $bk['appointment_time'],
@@ -411,10 +417,6 @@ if ($step >= 3 && $bk['type'] !== 'consultation' && empty($bk['service_ids'])) {
     $step = 2;
     $bk['step'] = 2;
 }
-if ($step >= 3 && $bk['type'] === 'consultation' && empty($bk['doctor_id'])) {
-    $step = 2;
-    $bk['step'] = 2;
-}
 if ($step >= 4 && $bk['type'] !== 'consultation' && empty($bk['service_ids'])) {
     $step = 2;
     $bk['step'] = 2;
@@ -439,10 +441,7 @@ if ($bk['type'] === 'individual') {
     $individualServices = fetchLabBookingIndividuals($conn);
 }
 if ($bk['type'] === 'consultation') {
-    $bookingDoctors = array_values(array_filter(
-        fetch_doctors_schedule_reference($conn),
-        static fn (array $doctor): bool => (int) ($doctor['is_active'] ?? 0) === 1
-    ));
+    $bookingDoctors = consultationDoctorDirectory();
 }
 
 $groupedPackages = !empty($packageServices) ? lab_group_services_list($packageServices) : [];
@@ -519,6 +518,13 @@ if ($bk['type'] === 'consultation' && !empty($bk['doctor_id'])) {
         );
     }
 }
+$consultationDoctorKeys = array_fill_keys(
+    array_map(
+        static fn (array $doctor): string => consultationDoctorNameKey((string) $doctor['full_name']),
+        consultationDoctorDirectory()
+    ),
+    true
+);
 $doctorSlotSql = "SELECT u.id, u.full_name, u.specialty, da.day_of_week, da.time_start, da.time_end
     FROM doctor_availability da
     INNER JOIN users u ON u.id = da.user_id
@@ -531,6 +537,9 @@ $doctorSlotSql .= ' ORDER BY da.day_of_week, da.time_start, u.full_name';
 $doctorSlotResult = $conn->query($doctorSlotSql);
 if ($doctorSlotResult) {
     while ($slot = $doctorSlotResult->fetch_assoc()) {
+        if ($bk['type'] === 'consultation' && empty($consultationDoctorKeys[consultationDoctorNameKey((string) ($slot['full_name'] ?? ''))])) {
+            continue;
+        }
         $dow = (int) ($slot['day_of_week'] ?? 0);
         if ($dow < 1 || $dow > 7) {
             continue;
@@ -700,23 +709,26 @@ $additionalStyles = '
     .summary-table { width: 100%; border-collapse: collapse; margin: 12px 0; }
     .summary-table td { padding: 8px 0; border-bottom: 1px solid #eee; }
     .summary-table td:last-child { text-align: right; font-weight: 600; color: #0077b6; }
-    .doc-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 12px; }
-    @media (max-width: 640px) { .doc-grid { grid-template-columns: 1fr; } }
-    .doc-card { border-radius: 16px; padding: 18px; border: 2px solid #e0e0e0; background: #fafafa; transition: border-color 0.2s, box-shadow 0.2s; }
-    .doc-card.theme-intern { border-color: #2196f3; background: linear-gradient(145deg, #e3f2fd 0%, #fff 55%); }
-    .doc-card.theme-peds { border-color: #fbc02d; background: linear-gradient(145deg, #fffde7 0%, #fff 55%); }
-    .doc-card-disabled { opacity: 0.72; filter: grayscale(0.15); pointer-events: none; }
-    .doc-card.doc-selected { box-shadow: 0 6px 22px rgba(0,119,182,0.2); border-color: #0077b6; }
-    .doc-badge { display: inline-block; font-size: 0.72rem; font-weight: 800; letter-spacing: 0.06em; padding: 6px 12px; border-radius: 8px; margin-bottom: 10px; }
-    .doc-badge.intern { background: #1976d2; color: #fff; }
-    .doc-badge.peds { background: #f9a825; color: #1a1a1a; }
-    .doc-card h4 { margin: 0 0 8px; color: #023e8a; font-size: 1.1rem; line-height: 1.3; }
-    .doc-hours { font-size: 0.88rem; color: #444; white-space: pre-line; line-height: 1.45; margin: 0 0 10px; }
-    .doc-status { font-size: 0.82rem; font-weight: 600; margin-top: 8px; }
-    .doc-status.ok { color: #1b5e20; }
-    .doc-status.no { color: #c62828; }
-    .doc-pick { margin-top: 10px; display: flex; align-items: center; gap: 10px; }
-    .doc-pick input[type=radio] { width: 20px; height: 20px; accent-color: #0077b6; }
+    .step-context-box { border-left-width:5px; background:linear-gradient(135deg,#eff9ff 0%,#f8fdff 100%); color:#115b7d; box-shadow:0 10px 24px rgba(0,119,182,.08); }
+    .doctor-directory { margin-top:14px; padding:22px; border:1px solid #d7e9f2; border-radius:20px; background:linear-gradient(135deg,#ffffff 0%,#f7fcff 100%); box-shadow:0 16px 34px rgba(20,79,123,.08); }
+    .doctor-directory-head { display:flex; align-items:center; justify-content:space-between; gap:16px; margin-bottom:16px; padding-bottom:14px; border-bottom:1px solid #e2eff6; }
+    .doctor-directory-head span { display:block; color:#0884bd; font-size:.72rem; font-weight:950; letter-spacing:.08em; text-transform:uppercase; }
+    .doctor-directory-head strong { display:block; margin-top:3px; color:#073b4c; font-size:1.18rem; line-height:1.2; }
+    .doctor-directory-head small { color:#657a86; font-size:.88rem; line-height:1.35; text-align:right; }
+    .doc-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:14px; margin-top:0; }
+    .doc-card { display:grid; grid-template-columns:48px minmax(0,1fr); gap:13px; align-items:start; min-height:116px; border-radius:16px; padding:16px; border:1px solid #cfe4ef; background:linear-gradient(180deg,#ffffff 0%,#fbfeff 100%); box-shadow:0 8px 20px rgba(20,79,123,.06); transition:transform .18s ease, box-shadow .18s ease, border-color .18s ease; }
+    .doc-card:hover { transform:translateY(-2px); border-color:#9fd5eb; box-shadow:0 14px 28px rgba(20,79,123,.1); }
+    .doc-avatar { flex:0 0 48px; width:48px; height:48px; display:grid; place-items:center; border-radius:15px; background:linear-gradient(135deg,#def7ff,#eefaff); color:#0878b5; box-shadow:inset 0 0 0 1px rgba(8,120,181,.08); }
+    .doc-avatar svg { width:24px; height:24px; stroke:currentColor; stroke-width:2; fill:none; stroke-linecap:round; stroke-linejoin:round; }
+    .doc-copy { min-width:0; }
+    .doc-badge { display:inline-flex; align-items:center; min-height:22px; padding:0 9px; border-radius:999px; background:#edf8fd; color:#0878b5; font-size:.64rem; font-weight:950; letter-spacing:.07em; text-transform:uppercase; }
+    .doc-card h4 { margin:9px 0 5px; color:#073b4c; font-size:1.02rem; line-height:1.25; overflow-wrap:anywhere; }
+    .doc-specialty { margin:0; color:#607784; font-size:.86rem; line-height:1.35; }
+    .doc-list-note { margin:16px 0 0; padding:12px 14px; border-radius:13px; background:#f2f9fd; color:#4f6674; font-size:.9rem; line-height:1.45; }
+    .doc-list-actions { margin-top:18px; display:flex; justify-content:flex-end; gap:10px; align-items:center; }
+    .doc-list-actions .btn-primary { width:auto; min-width:260px; margin:0; padding:13px 28px; border-radius:12px; box-shadow:0 12px 24px rgba(0,119,182,.15); }
+    @media (max-width: 980px) { .doc-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+    @media (max-width: 640px) { .doctor-directory { padding:15px; } .doctor-directory-head { align-items:flex-start; flex-direction:column; } .doctor-directory-head small { text-align:left; } .doc-grid { grid-template-columns:1fr; } .doc-list-actions .btn-primary { width:100%; min-width:0; } }
     .capacity-modal { position:fixed; inset:0; z-index:5400; display:none; place-items:center; padding:20px; background:rgba(5,35,52,.58); backdrop-filter:blur(5px); }
     .capacity-modal.open { display:grid; }
     .capacity-dialog { width:min(560px,100%); max-height:min(82vh,720px); overflow:auto; border:1px solid #c9e2ef; border-radius:22px; background:#fff; box-shadow:0 28px 80px rgba(4,35,52,.3); }
@@ -924,7 +936,7 @@ $stepLabels = [
             <div class="clinic-reminder">
                 <span class="clinic-reminder-number" aria-hidden="true">2</span>
                 <strong>Select your schedule</strong>
-                <span>Choose a date within the clinic or selected doctor's availability.</span>
+                <span>Choose an open clinic date before continuing.</span>
             </div>
             <div class="clinic-reminder">
                 <span class="clinic-reminder-number" aria-hidden="true">3</span>
@@ -948,7 +960,7 @@ $stepLabels = [
         <?php endif; ?>
 
         <?php if ($step === 1): ?>
-            <div class="info-box">
+            <div class="info-box step-context-box">
                 <strong>Step 1.</strong> Choose between a <strong>Doctor Consultation</strong>, a clinic <strong>Package Deal</strong>, or <strong>Individual Laboratory Tests</strong>.
             </div>
             <form method="post" action="book_appointment.php">
@@ -957,7 +969,7 @@ $stepLabels = [
                 <div class="choice-grid">
                     <button type="submit" name="booking_type" value="consultation" class="choice-card" style="font-family:inherit;width:100%;">
                         <h3>Doctor consultation</h3>
-                        <p>Choose an available doctor based on specialty and clinic schedule.</p>
+                        <p>Review the clinic doctor list, then choose your visit date.</p>
                     </button>
                     <button type="submit" name="booking_type" value="package" class="choice-card" style="font-family:inherit;width:100%;">
                         <h3>Package deals</h3>
@@ -974,7 +986,7 @@ $stepLabels = [
                 <strong>Step 2.</strong>
                 <?php
                 if ($bk['type'] === 'consultation') {
-                    echo 'Choose your preferred doctor and review the specialty before continuing.';
+                    echo 'Review the clinic doctors available for consultation. You will choose the appointment date next.';
                 } elseif ($bk['type'] === 'package') {
                     echo 'Choose one package. The final payment is made at the clinic.';
                 } else {
@@ -988,31 +1000,36 @@ $stepLabels = [
                     <?php if (empty($bookingDoctors)): ?>
                         <p>No active doctors are available yet. Please contact the clinic.</p>
                     <?php else: ?>
-                        <div class="doc-grid">
-                            <?php foreach ($bookingDoctors as $doctor): ?>
-                                <?php
-                                $doctorId = (int) $doctor['id'];
-                                $themeClass = (string) ($doctor['theme']['class'] ?? 'theme-intern');
-                                $themeLabel = (string) ($doctor['theme']['label'] ?? 'DOCTOR');
-                                ?>
-                                <label class="doc-card <?php echo htmlspecialchars($themeClass); ?>">
-                                    <span class="doc-badge <?php echo strpos($themeClass, 'peds') !== false ? 'peds' : 'intern'; ?>">
-                                        <?php echo htmlspecialchars($themeLabel); ?>
-                                    </span>
-                                    <h4><?php echo htmlspecialchars((string) $doctor['full_name']); ?></h4>
-                                    <p class="doc-hours"><?php echo htmlspecialchars((string) $doctor['clinic_hours']); ?></p>
-                                    <span class="doc-pick">
-                                        <input
-                                            type="radio"
-                                            name="doctor_id"
-                                            value="<?php echo $doctorId; ?>"
-                                            <?php echo (int) ($bk['doctor_id'] ?? 0) === $doctorId ? 'checked' : ''; ?>
-                                            required
-                                        >
-                                        Select this doctor
-                                    </span>
-                                </label>
-                            <?php endforeach; ?>
+                        <div class="doctor-directory">
+                            <div class="doctor-directory-head">
+                                <div>
+                                    <span>Consultation team</span>
+                                    <strong>Available clinic doctors</strong>
+                                </div>
+                                <small>Doctor assignment is confirmed by the clinic during your visit.</small>
+                            </div>
+                            <div class="doc-grid">
+                                <?php foreach ($bookingDoctors as $doctor): ?>
+                                    <article class="doc-card">
+                                        <span class="doc-avatar" aria-hidden="true">
+                                            <svg viewBox="0 0 24 24">
+                                                <path d="M12 5v14"></path>
+                                                <path d="M5 12h14"></path>
+                                                <path d="M7 4h10a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z"></path>
+                                            </svg>
+                                        </span>
+                                        <div class="doc-copy">
+                                            <span class="doc-badge"><?php echo htmlspecialchars((string) ($doctor['specialty'] ?? 'Clinic Doctor')); ?></span>
+                                            <h4><?php echo htmlspecialchars((string) $doctor['full_name']); ?></h4>
+                                            <p class="doc-specialty">Doctor consultation</p>
+                                        </div>
+                                    </article>
+                                <?php endforeach; ?>
+                            </div>
+                            <p class="doc-list-note">Choose your appointment date next. The front desk will finalize the assigned doctor based on clinic availability.</p>
+                            <div class="doc-list-actions">
+                                <button type="submit" class="btn-primary">Continue to review</button>
+                            </div>
                         </div>
                     <?php endif; ?>
                 <?php elseif ($bk['type'] === 'package'): ?>
@@ -1115,9 +1132,9 @@ $stepLabels = [
                         </div>
                     <?php endif; ?>
                 <?php endif; ?>
-                <button type="submit" class="btn-primary">
-                    <?php echo $bk['type'] === 'consultation' ? 'Next: review doctor' : 'Next: view details'; ?>
-                </button>
+                <?php if ($bk['type'] !== 'consultation'): ?>
+                    <button type="submit" class="btn-primary">Next: view details</button>
+                <?php endif; ?>
             </form>
             <script>
             (function() {
@@ -1198,14 +1215,14 @@ $stepLabels = [
             <div class="info-box">
                 <strong>Step 3.</strong>
                 <?php echo $bk['type'] === 'consultation'
-                    ? 'Review your selected doctor before choosing an appointment date.'
+                    ? 'Review the consultation details before choosing an appointment date.'
                     : 'Review the selected services and prices. Payment is made at the clinic.'; ?>
             </div>
-            <?php if ($bk['type'] === 'consultation' && $selectedDoctor): ?>
+            <?php if ($bk['type'] === 'consultation'): ?>
                 <div class="detail-block">
-                    <h4><?php echo htmlspecialchars((string) $selectedDoctor['full_name']); ?></h4>
-                    <p><strong>Specialty:</strong> <?php echo htmlspecialchars((string) ($selectedDoctor['specialty'] ?: 'General consultation')); ?></p>
-                    <p class="price-tag consultation-fee-note">Consultation fee will be confirmed and paid at the clinic.</p>
+                    <h4>Doctor consultation</h4>
+                    <p>Clinic doctors are available for consultation. The clinic will confirm the assigned doctor and payment at the front desk.</p>
+                    <p class="price-tag consultation-fee-note">Consultation fee is paid at the clinic.</p>
                 </div>
             <?php else: ?>
                 <?php foreach ($selectedServices as $svc): ?>
@@ -1235,6 +1252,8 @@ $stepLabels = [
                 <strong>Step 4 - Appointment schedule.</strong>
                 <?php if ($bk['type'] === 'consultation' && $selectedDoctor): ?>
                     Choose a date when <?php echo htmlspecialchars((string) $selectedDoctor['full_name']); ?> is available.
+                <?php elseif ($bk['type'] === 'consultation'): ?>
+                    Choose an open clinic date for your consultation.
                 <?php else: ?>
                     Choose an open clinic date for your laboratory visit.
                 <?php endif; ?>
@@ -1266,18 +1285,26 @@ $stepLabels = [
                                     $dateDayOfWeek = (int) date('N', strtotime($dateValue));
                                     $clinicOpen = $dateDayOfWeek >= 1 && $dateDayOfWeek <= 6;
                                     $doctorSlots = $calendarDoctorSlotsByDow[$dateDayOfWeek] ?? [];
-                                    $selectedDoctorBooked = $selectedDoctor
-                                        ? (int) ($calendarDoctorDayCounts[(int) $selectedDoctor['id']][$dateValue] ?? 0)
-                                        : 0;
-                                    $selectedDoctorFull = $selectedDoctor && $selectedDoctorBooked >= $doctorDailyLimit;
-                                    $selectedDoctorCapacityRows = $selectedDoctor ? [[
-                                        'doctor' => (string) $selectedDoctor['full_name'],
-                                        'specialty' => (string) ($selectedDoctor['specialty'] ?: 'General consultation'),
-                                        'booked' => $selectedDoctorBooked,
-                                        'remaining' => max(0, $doctorDailyLimit - $selectedDoctorBooked),
-                                        'limit' => $doctorDailyLimit,
-                                        'full' => (bool) $selectedDoctorFull,
-                                    ]] : [];
+                                    $consultationCapacityRows = [];
+                                    $consultationBooked = 0;
+                                    foreach ($doctorSlots as $slot) {
+                                        $slotBooked = (int) ($calendarDoctorDayCounts[(int) $slot['id']][$dateValue] ?? 0);
+                                        $consultationBooked += $slotBooked;
+                                        $consultationCapacityRows[] = [
+                                            'doctor' => (string) $slot['doctor'],
+                                            'specialty' => (string) ($slot['specialty'] ?: 'Clinic Doctor'),
+                                            'booked' => $slotBooked,
+                                            'remaining' => max(0, $doctorDailyLimit - $slotBooked),
+                                            'limit' => $doctorDailyLimit,
+                                            'full' => $slotBooked >= $doctorDailyLimit,
+                                        ];
+                                    }
+                                    $consultationLimit = max(0, count($consultationCapacityRows) * $doctorDailyLimit);
+                                    $consultationFull = !empty($consultationCapacityRows) && array_reduce(
+                                        $consultationCapacityRows,
+                                        static fn (bool $carry, array $row): bool => $carry && (bool) $row['full'],
+                                        true
+                                    );
                                     $labBooked = (int) ($calendarLabDayCounts[$dateValue] ?? 0);
                                     $labFull = $bk['type'] !== 'consultation' && $labBooked >= $labDailyLimit;
                                     $labCapacityRows = [[
@@ -1288,10 +1315,10 @@ $stepLabels = [
                                         'limit' => $labDailyLimit,
                                         'full' => (bool) $labFull,
                                     ]];
-                                    $capacityRows = $bk['type'] === 'consultation' ? $selectedDoctorCapacityRows : $labCapacityRows;
-                                    $capacityBooked = $bk['type'] === 'consultation' ? $selectedDoctorBooked : $labBooked;
-                                    $capacityLimit = $bk['type'] === 'consultation' ? $doctorDailyLimit : $labDailyLimit;
-                                    $capacityFull = $bk['type'] === 'consultation' ? $selectedDoctorFull : $labFull;
+                                    $capacityRows = $bk['type'] === 'consultation' ? $consultationCapacityRows : $labCapacityRows;
+                                    $capacityBooked = $bk['type'] === 'consultation' ? $consultationBooked : $labBooked;
+                                    $capacityLimit = $bk['type'] === 'consultation' ? $consultationLimit : $labDailyLimit;
+                                    $capacityFull = $bk['type'] === 'consultation' ? $consultationFull : $labFull;
                                     $classes = ['cal-day'];
                                     if ($dateValue === $calendarToday) {
                                         $classes[] = 'is-today';
@@ -1334,18 +1361,22 @@ $stepLabels = [
                                                     <span class="clinic-hours-label">Clinic open</span>
                                                 </small>
                                                  <?php if ($bk['type'] === 'consultation'): ?>
-                                                <small class="capacity-event<?php echo $selectedDoctorFull ? ' is-full' : ''; ?>">
-                                                    <strong><?php echo $selectedDoctorFull ? 'Fully booked' : $selectedDoctorBooked . '/' . $doctorDailyLimit . ' booked'; ?></strong>
-                                                    <span><?php echo max(0, $doctorDailyLimit - $selectedDoctorBooked); ?> appointment slots remaining</span>
-                                                </small>
-                                                 <?php foreach (array_slice($doctorSlots, 0, 2) as $slot): ?>
-                                                    <small class="doctor-event<?php echo $selectedDoctorFull ? ' is-full' : ''; ?>">
-                                                        <span class="availability-label"><?php echo htmlspecialchars($slot['specialty'] !== '' ? $slot['specialty'] : 'Available'); ?></span>
-                                                        <span class="availability-doctor"><?php echo htmlspecialchars($slot['doctor']); ?></span>
+                                                <?php if (empty($doctorSlots)): ?>
+                                                    <small class="clinic-closed-event">No doctor schedule</small>
+                                                <?php else: ?>
+                                                    <small class="capacity-event<?php echo $consultationFull ? ' is-full' : ''; ?>">
+                                                        <strong><?php echo $consultationFull ? 'Fully booked' : $consultationBooked . '/' . $consultationLimit . ' booked'; ?></strong>
+                                                        <span><?php echo max(0, $consultationLimit - $consultationBooked); ?> consultation slots remaining</span>
                                                     </small>
-                                                <?php endforeach; ?>
-                                                <?php if (count($doctorSlots) > 2): ?>
-                                                    <small class="more-event">+<?php echo count($doctorSlots) - 2; ?> more doctor slots</small>
+                                                    <?php foreach (array_slice($doctorSlots, 0, 2) as $slot): ?>
+                                                        <small class="doctor-event">
+                                                            <span class="availability-label"><?php echo htmlspecialchars($slot['specialty'] !== '' ? $slot['specialty'] : 'Available'); ?></span>
+                                                            <span class="availability-doctor"><?php echo htmlspecialchars($slot['doctor']); ?></span>
+                                                        </small>
+                                                    <?php endforeach; ?>
+                                                    <?php if (count($doctorSlots) > 2): ?>
+                                                        <small class="more-event">+<?php echo count($doctorSlots) - 2; ?> more doctors</small>
+                                                    <?php endif; ?>
                                                 <?php endif; ?>
                                                 <?php else: ?>
                                                 <small class="capacity-event<?php echo $labFull ? ' is-full' : ''; ?>">
@@ -1369,6 +1400,8 @@ $stepLabels = [
                             <p class="schedule-note">
                                 <?php if ($bk['type'] === 'consultation' && $selectedDoctor): ?>
                                     Only dates within <?php echo htmlspecialchars((string) $selectedDoctor['full_name']); ?>'s availability can be selected.
+                                <?php elseif ($bk['type'] === 'consultation'): ?>
+                                    Consultation booking is available on open clinic dates with scheduled doctors.
                                 <?php else: ?>
                                     Laboratory appointments are available on open clinic dates, up to <?php echo $labDailyLimit; ?> bookings per day.
                                 <?php endif; ?>
@@ -1472,6 +1505,8 @@ $stepLabels = [
                 <?php if ($bk['type'] === 'consultation' && $selectedDoctor): ?>
                     <tr><td>Doctor</td><td><?php echo htmlspecialchars((string) $selectedDoctor['full_name']); ?></td></tr>
                     <tr><td>Specialty</td><td><?php echo htmlspecialchars((string) ($selectedDoctor['specialty'] ?: 'General consultation')); ?></td></tr>
+                <?php elseif ($bk['type'] === 'consultation'): ?>
+                    <tr><td>Doctor</td><td>Clinic doctor assignment</td></tr>
                 <?php endif; ?>
                 <tr><td>Date</td><td><?php echo htmlspecialchars($bk['appointment_date']); ?></td></tr>
                 <?php if ($bk['type'] === 'consultation'): ?>

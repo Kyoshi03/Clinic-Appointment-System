@@ -40,7 +40,7 @@ function init_doctor_schema_and_accounts(mysqli $conn): void {
         completed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
 
-    $seedKey = 'default_doctor_accounts_v1';
+    $seedKey = 'default_doctor_accounts_v2';
     $seedCheck = $conn->prepare('SELECT seed_key FROM system_seed_state WHERE seed_key = ? LIMIT 1');
     $seedCheck->bind_param('s', $seedKey);
     $seedCheck->execute();
@@ -54,26 +54,63 @@ function init_doctor_schema_and_accounts(mysqli $conn): void {
     $defaultPass = password_hash('password123', PASSWORD_DEFAULT);
     $doctors = [
         [
-            'username' => 'dr.estrada',
-            'full_name' => 'DR. RYAN CLIFFORD ESTRADA',
-            'specialty' => 'Internist',
-            'email' => 'dr.estrada@globalife.local',
+            'username' => 'dra.encina',
+            'full_name' => 'Dra. Vunelyn Encina',
+            'specialty' => 'Clinic Doctor',
+            'email' => 'dra.encina@globalife.local',
             'phone' => '',
             'slots' => [
-                [2, '14:00:00', '15:00:00'],
-                [6, '11:30:00', '12:30:00'],
+                [1, '08:00:00', '17:00:00'],
+                [3, '08:00:00', '17:00:00'],
+                [5, '08:00:00', '17:00:00'],
+            ],
+        ],
+        [
+            'username' => 'dra.casas',
+            'full_name' => 'Dra. Enely Casas',
+            'specialty' => 'Clinic Doctor',
+            'email' => 'dra.casas@globalife.local',
+            'phone' => '',
+            'slots' => [
+                [2, '08:00:00', '17:00:00'],
+                [4, '08:00:00', '17:00:00'],
+                [6, '08:00:00', '17:00:00'],
+            ],
+        ],
+        [
+            'username' => 'dra.mojica',
+            'full_name' => 'Dra. Marlin Mojica',
+            'specialty' => 'Clinic Doctor',
+            'email' => 'dra.mojica@globalife.local',
+            'phone' => '',
+            'slots' => [
+                [1, '08:00:00', '17:00:00'],
+                [2, '08:00:00', '17:00:00'],
+                [4, '08:00:00', '17:00:00'],
             ],
         ],
         [
             'username' => 'dra.tebelin',
-            'full_name' => 'DRA. RODA TEBELIN',
-            'specialty' => 'Pediatrician',
+            'full_name' => 'Dra. Roda Tebelin',
+            'specialty' => 'Clinic Doctor',
             'email' => 'dra.tebelin@globalife.local',
             'phone' => '',
             'slots' => [
-                [1, '13:00:00', '15:00:00'],
-                [3, '13:00:00', '15:00:00'],
-                [5, '13:00:00', '16:00:00'],
+                [1, '08:00:00', '17:00:00'],
+                [3, '08:00:00', '17:00:00'],
+                [5, '08:00:00', '17:00:00'],
+            ],
+        ],
+        [
+            'username' => 'dra.aberia',
+            'full_name' => 'Dra. Michelle Aberia',
+            'specialty' => 'Clinic Doctor',
+            'email' => 'dra.aberia@globalife.local',
+            'phone' => '',
+            'slots' => [
+                [2, '08:00:00', '17:00:00'],
+                [4, '08:00:00', '17:00:00'],
+                [6, '08:00:00', '17:00:00'],
             ],
         ],
     ];

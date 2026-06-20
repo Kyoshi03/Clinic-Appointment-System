@@ -252,34 +252,35 @@ function appointment_validate_payload(mysqli $conn, int $patientId, array $paylo
     $doctorId = (int) ($payload['doctor_id'] ?? 0);
     $doctorName = '';
     if ($type === 'consultation') {
-        if ($doctorId <= 0) {
-            return ['ok' => false, 'error' => 'Please choose a doctor for your consultation.'];
-        }
-        $doctorStmt = $conn->prepare(
-            "SELECT full_name FROM users
-             WHERE id = ? AND role = 'doctor' AND COALESCE(is_active, 1) = 1
-             LIMIT 1"
-        );
-        $doctorStmt->bind_param('i', $doctorId);
-        $doctorStmt->execute();
-        $doctor = $doctorStmt->get_result()->fetch_assoc();
-        $doctorStmt->close();
-        if (!$doctor) {
-            return ['ok' => false, 'error' => 'The selected doctor is no longer available. Please choose another doctor.'];
-        }
-        if (!user_is_doctor_available_at($conn, $doctorId, $date, $time)) {
-            return ['ok' => false, 'error' => 'The selected time is outside this doctor\'s clinic schedule. Please choose an available time.'];
-        }
-        $doctorName = (string) $doctor['full_name'];
+        if ($doctorId > 0) {
+            $doctorStmt = $conn->prepare(
+                "SELECT full_name FROM users
+                 WHERE id = ? AND role = 'doctor' AND COALESCE(is_active, 1) = 1
+                 LIMIT 1"
+            );
+            $doctorStmt->bind_param('i', $doctorId);
+            $doctorStmt->execute();
+            $doctor = $doctorStmt->get_result()->fetch_assoc();
+            $doctorStmt->close();
+            if (!$doctor) {
+                return ['ok' => false, 'error' => 'The selected doctor is no longer available. Please choose another doctor.'];
+            }
+            if (!user_is_doctor_available_at($conn, $doctorId, $date, $time)) {
+                return ['ok' => false, 'error' => 'The selected time is outside this doctor\'s clinic schedule. Please choose an available time.'];
+            }
+            $doctorName = (string) $doctor['full_name'];
 
-        $capacity = appointment_doctor_day_capacity($conn, $doctorId, $date);
-        if ($capacity['is_full']) {
-            return [
-                'ok' => false,
-                'error' => 'This doctor is fully booked on the selected date ('
-                    . $capacity['booked'] . '/' . $capacity['limit']
-                    . ' appointments). Please choose another date.',
-            ];
+            $capacity = appointment_doctor_day_capacity($conn, $doctorId, $date);
+            if ($capacity['is_full']) {
+                return [
+                    'ok' => false,
+                    'error' => 'This doctor is fully booked on the selected date ('
+                        . $capacity['booked'] . '/' . $capacity['limit']
+                        . ' appointments). Please choose another date.',
+                ];
+            }
+        } else {
+            $doctorName = 'Clinic doctor assignment';
         }
     } else {
         $capacity = appointment_lab_day_capacity($conn, $date);
@@ -741,7 +742,7 @@ function appointment_verify_and_create(mysqli $conn, int $patientId, int $verifi
     $booking = $validated['booking'];
     $serviceNames = $validated['service_names'];
     if (($booking['type'] ?? '') === 'consultation') {
-        $notes = 'Doctor consultation with ' . (string) $validated['doctor_name']
+        $notes = 'Doctor consultation | ' . (string) $validated['doctor_name']
             . ' | Consultation fee confirmed at clinic';
     } else {
         $notes = 'Services: ' . implode(', ', $serviceNames)
