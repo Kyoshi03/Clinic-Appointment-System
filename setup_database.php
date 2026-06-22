@@ -46,7 +46,11 @@ try {
         id INT AUTO_INCREMENT PRIMARY KEY,
         username VARCHAR(50) UNIQUE NOT NULL,
         password VARCHAR(255) NOT NULL,
-        full_name VARCHAR(100) NOT NULL,
+        first_name VARCHAR(40) DEFAULT NULL,
+        middle_name VARCHAR(10) DEFAULT NULL,
+        last_name VARCHAR(40) DEFAULT NULL,
+        suffix VARCHAR(10) DEFAULT NULL,
+        full_name VARCHAR(100) GENERATED ALWAYS AS (TRIM(CONCAT_WS(' ', NULLIF(first_name, ''), NULLIF(middle_name, ''), NULLIF(last_name, ''), NULLIF(suffix, '')))) STORED INVISIBLE,
         role ENUM('admin', 'nurse', 'receptionist', 'patient') NOT NULL,
         email VARCHAR(100),
         phone VARCHAR(20),
@@ -71,6 +75,10 @@ try {
     
     // Add columns if they don't exist (for existing tables)
     $columns_to_add = [
+        ['first_name', "VARCHAR(40) DEFAULT NULL", 'password'],
+        ['middle_name', "VARCHAR(10) DEFAULT NULL", 'first_name'],
+        ['last_name', "VARCHAR(40) DEFAULT NULL", 'middle_name'],
+        ['suffix', "VARCHAR(10) DEFAULT NULL", 'last_name'],
         ['gender', "ENUM('Male', 'Female', 'Other') DEFAULT NULL", 'phone'],
         ['date_of_birth', 'DATE DEFAULT NULL', 'gender'],
         ['age', 'INT DEFAULT NULL', 'date_of_birth'],
@@ -178,4 +186,3 @@ try {
 
 echo "</div></body></html>";
 ?>
-

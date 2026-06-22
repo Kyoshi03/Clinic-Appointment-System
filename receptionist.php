@@ -257,12 +257,36 @@ if ($staffResult) {
     $staffCounts['doctor_unavailable'] = (int) ($row['doctors_unavailable'] ?? 0);
 }
 
+$receptionNotifications = [];
+$receptionUnreadNotifications = 0;
+if (function_exists('fetch_clinic_notifications') && function_exists('count_unread_clinic_notifications')) {
+    $receptionNotifications = fetch_clinic_notifications(
+        $conn,
+        'receptionist',
+        (int) ($currentUser['id'] ?? 0),
+        5
+    );
+    $receptionUnreadNotifications = count_unread_clinic_notifications(
+        $conn,
+        'receptionist',
+        (int) ($currentUser['id'] ?? 0)
+    );
+}
+
 $conn->close();
 
 $totalToday = count($todayAppointments);
 $activeQueue = $statusTotals['pending'] + $statusTotals['confirmed'];
 $readyQueue = $statusTotals['confirmed'];
 $todayLabel = date('F d, Y');
+$upcomingAppointments = array_values(array_filter($todayAppointments, function (array $appointment) use ($today): bool {
+    return (string) ($appointment['appointment_date'] ?? '') >= $today
+        && in_array(receptionist_status($appointment), ['pending', 'confirmed'], true);
+}));
+$activeQueueAppointments = array_values(array_filter($todayAppointments, function (array $appointment): bool {
+    return in_array(receptionist_status($appointment), ['pending', 'confirmed'], true);
+}));
+$recentActivities = array_slice($receptionNotifications, 0, 4);
 $showReceptionCalendar = isset($_GET['calendar']) || isset($_GET['calendar_month']) || isset($_GET['calendar_date']);
 
 $calendarMonthParam = trim((string) ($_GET['calendar_month'] ?? ''));
@@ -335,6 +359,347 @@ body {
 .receptionist-dashboard > section {
     padding-top: 0;
     padding-bottom: 0;
+}
+
+.reception-desk-heading {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    gap: 18px;
+    padding: 4px 2px 18px;
+}
+
+.reception-title-lockup {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.reception-title-logo {
+    width: 42px;
+    height: 42px;
+    flex: 0 0 auto;
+    border: 1px solid #c9e6f3;
+    border-radius: 10px;
+    background: #fff;
+    box-shadow: 0 7px 18px rgba(21, 93, 130, 0.1);
+    object-fit: contain;
+    padding: 4px;
+}
+
+.reception-desk-heading h1 {
+    margin: 0;
+    color: #073b4c;
+    font-size: clamp(1.45rem, 2.5vw, 2rem);
+    line-height: 1.15;
+}
+
+.reception-desk-heading p {
+    margin: 6px 0 0;
+    color: #60727d;
+    line-height: 1.45;
+}
+
+.reception-date-line {
+    color: #315b6d;
+    font-size: 0.88rem;
+    font-weight: 800;
+    white-space: nowrap;
+}
+
+.reception-operations-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1.18fr) minmax(280px, 0.82fr);
+    gap: 14px;
+    margin-bottom: 14px;
+}
+
+.reception-sidebar-stack {
+    display: grid;
+    gap: 14px;
+}
+
+.operations-panel {
+    padding: 18px;
+}
+
+.operations-panel-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 12px;
+    margin-bottom: 14px;
+}
+
+.operations-panel-head h2 {
+    margin: 0;
+    color: #073b4c;
+    font-size: 1.13rem;
+}
+
+.operations-panel-head p {
+    margin: 4px 0 0;
+    color: #60727d;
+    font-size: 0.88rem;
+    line-height: 1.4;
+}
+
+.operations-link {
+    color: #0878b8;
+    font-size: 0.86rem;
+    font-weight: 900;
+    text-decoration: none;
+    white-space: nowrap;
+}
+
+.operations-link:hover {
+    text-decoration: underline;
+}
+
+.queue-overview {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+    margin-bottom: 14px;
+}
+
+.queue-overview-item {
+    border: 1px solid #e0ebf3;
+    border-radius: 8px;
+    background: #f8fbff;
+    padding: 11px;
+}
+
+.queue-overview-item span,
+.queue-overview-item small {
+    display: block;
+    color: #60727d;
+    font-size: 0.76rem;
+    font-weight: 800;
+}
+
+.queue-overview-item strong {
+    display: block;
+    margin: 3px 0;
+    color: #073b4c;
+    font-size: 1.35rem;
+    line-height: 1;
+}
+
+.compact-queue-list,
+.activity-list,
+.dashboard-notification-list {
+    display: grid;
+    gap: 8px;
+}
+
+.compact-queue-item,
+.compact-upcoming-item,
+.activity-item,
+.dashboard-notification-item {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 10px;
+    border: 1px solid #e0ebf3;
+    border-radius: 8px;
+    background: #fff;
+    padding: 10px 12px;
+}
+
+.queue-patient,
+.upcoming-patient,
+.next-patient-identity {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    gap: 9px;
+}
+
+.queue-patient-copy,
+.upcoming-patient-copy {
+    min-width: 0;
+}
+
+.compact-queue-item,
+.compact-upcoming-item,
+.activity-item,
+.dashboard-notification-item {
+    color: inherit;
+    text-decoration: none;
+}
+
+.compact-queue-item:hover,
+.compact-upcoming-item:hover,
+.activity-item:hover,
+.dashboard-notification-item:hover {
+    border-color: #9ed8ed;
+    background: #f3fbff;
+}
+
+.queue-time {
+    display: inline-grid;
+    min-width: 62px;
+    min-height: 38px;
+    place-items: center;
+    border-radius: 7px;
+    background: #edf8ff;
+    color: #0b5f91;
+    font-size: 0.8rem;
+    font-weight: 900;
+    text-align: center;
+}
+
+.compact-queue-item .queue-patient-copy strong,
+.compact-upcoming-item .upcoming-patient-copy strong,
+.activity-item strong,
+.dashboard-notification-item strong {
+    display: block;
+    color: #073b4c;
+    font-size: 0.92rem;
+}
+
+.compact-queue-item .queue-patient-copy span,
+.compact-upcoming-item .upcoming-patient-copy span,
+.activity-item span,
+.dashboard-notification-item span {
+    display: block;
+    margin-top: 2px;
+    color: #60727d;
+    font-size: 0.8rem;
+    line-height: 1.35;
+}
+
+.next-patient-card {
+    display: grid;
+    gap: 12px;
+    border: 1px solid #c9e7f4;
+    border-radius: 10px;
+    background: linear-gradient(145deg, #f9fdff 0%, #edf8fc 100%);
+    padding: 14px;
+}
+
+.next-patient-topline {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+}
+
+.next-patient-label {
+    color: #0878b8;
+    font-size: 0.76rem;
+    font-weight: 900;
+    letter-spacing: 0;
+    text-transform: uppercase;
+}
+
+.next-patient-name {
+    margin: 0;
+    color: #073b4c;
+    font-size: 1.12rem;
+    line-height: 1.2;
+}
+
+.next-patient-identity {
+    align-items: flex-start;
+}
+
+.next-patient-identity .patient-profile-avatar {
+    margin-top: 1px;
+}
+
+.next-patient-service {
+    margin: 4px 0 0;
+    color: #60727d;
+    font-size: 0.86rem;
+}
+
+.next-patient-details {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+}
+
+.next-patient-detail {
+    border: 1px solid #dcebf3;
+    border-radius: 7px;
+    background: #fff;
+    padding: 9px;
+}
+
+.next-patient-detail span {
+    display: block;
+    color: #60727d;
+    font-size: 0.72rem;
+    font-weight: 850;
+    text-transform: uppercase;
+}
+
+.next-patient-detail strong {
+    display: block;
+    margin-top: 3px;
+    color: #073b4c;
+    font-size: 0.88rem;
+    overflow-wrap: anywhere;
+}
+
+.next-patient-open {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 38px;
+    border-radius: 7px;
+    background: #0878b8;
+    color: #fff;
+    font-size: 0.86rem;
+    font-weight: 900;
+    text-decoration: none;
+}
+
+.next-patient-open:hover {
+    background: #05689f;
+}
+
+.notification-count {
+    display: inline-grid;
+    min-width: 28px;
+    height: 28px;
+    place-items: center;
+    border-radius: 999px;
+    background: #eaf7ff;
+    color: #0878b8;
+    font-size: 0.78rem;
+    font-weight: 900;
+}
+
+.dashboard-notification-item {
+    grid-template-columns: minmax(0, 1fr);
+    background: #f8fbff;
+}
+
+.dashboard-notification-item.is-unread {
+    border-left: 3px solid #0f9ac6;
+    background: #f1fbff;
+}
+
+.activity-item {
+    grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.activity-date {
+    color: #60727d;
+    font-size: 0.75rem;
+    font-weight: 800;
+    white-space: nowrap;
+}
+
+.upcoming-list {
+    display: grid;
+    gap: 8px;
+    max-height: 340px;
+    overflow: auto;
+    padding-right: 2px;
 }
 
 .desk-hero {
@@ -1523,7 +1888,8 @@ body.modal-open {
     .desk-hero,
     .workbench-grid,
     .reception-flow,
-    .metrics-grid {
+    .metrics-grid,
+    .reception-operations-grid {
         grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
@@ -1541,6 +1907,7 @@ body.modal-open {
     .workbench-grid,
     .reception-flow,
     .metrics-grid,
+    .reception-operations-grid,
     .appointment-toolbar,
     .detail-grid,
     .staff-strip {
@@ -1557,6 +1924,34 @@ body.modal-open {
 
     .hero-main {
         padding: 22px;
+    }
+
+    .reception-desk-heading {
+        align-items: flex-start;
+        flex-direction: column;
+        gap: 6px;
+        padding-bottom: 14px;
+    }
+
+    .queue-overview {
+        grid-template-columns: 1fr;
+    }
+
+    .compact-queue-item,
+    .compact-upcoming-item,
+    .activity-item {
+        grid-template-columns: auto minmax(0, 1fr);
+    }
+
+    .compact-queue-item .status-badge,
+    .compact-upcoming-item .status-badge,
+    .activity-date {
+        grid-column: 2;
+        justify-self: start;
+    }
+
+    .next-patient-details {
+        grid-template-columns: 1fr;
     }
 
     .reception-flow-card {
@@ -1634,17 +2029,15 @@ body.modal-open {
 include 'includes/header.php';
 ?>
 <main class="receptionist-dashboard">
-    <section class="desk-hero">
-        <div class="hero-main">
-            <p class="eyebrow">Reception desk</p>
-            <h1>Welcome, <?php echo htmlspecialchars($currentUser['full_name']); ?></h1>
-            <p>Front desk board for patient bookings, ready queue, and doctor coordination.</p>
+    <section class="reception-desk-heading" aria-labelledby="receptionDeskTitle">
+        <div class="reception-title-lockup">
+            <img class="reception-title-logo" src="globalife.png" alt="Globalife Medical Laboratory and Polyclinic">
+            <div>
+                <h1 id="receptionDeskTitle">Reception desk</h1>
+                <p>Manage arrivals, booking requests, and clinic handoffs from one place.</p>
+            </div>
         </div>
-        <aside class="hero-side" aria-label="Today">
-            <span>Today</span>
-            <strong><?php echo htmlspecialchars($todayLabel); ?></strong>
-            <small><?php echo htmlspecialchars(date('l')); ?></small>
-        </aside>
+        <span class="reception-date-line"><?php echo htmlspecialchars($todayLabel); ?></span>
     </section>
 
     <?php if (isset($_SESSION['success'])): ?>
@@ -1678,27 +2071,122 @@ include 'includes/header.php';
         </div>
     </section>
 
-    <section class="reception-flow" aria-label="Reception workflow">
-        <div class="reception-flow-card">
-            <span class="flow-number">1</span>
-            <div>
-                <strong>Review requests</strong>
-                <span>Check pending appointments before the clinic flow starts.</span>
+    <section class="reception-operations-grid" aria-label="Reception operations">
+        <article class="panel operations-panel">
+            <div class="operations-panel-head">
+                <div>
+                    <h2>Today's queue</h2>
+                    <p>Patients that need review or are ready for the clinic team.</p>
+                </div>
+                <a class="operations-link" href="view_appointments.php">Open appointments</a>
             </div>
-        </div>
-        <div class="reception-flow-card">
-            <span class="flow-number">2</span>
-            <div>
-                <strong>Confirm arrivals</strong>
-                <span>Move verified patients to the nurse or doctor queue.</span>
+            <div class="queue-overview">
+                <div class="queue-overview-item">
+                    <span>Waiting review</span>
+                    <strong><?php echo $statusTotals['pending']; ?></strong>
+                    <small>Pending requests</small>
+                </div>
+                <div class="queue-overview-item">
+                    <span>Ready for care</span>
+                    <strong><?php echo $readyQueue; ?></strong>
+                    <small>Confirmed patients</small>
+                </div>
+                <div class="queue-overview-item">
+                    <span>Completed</span>
+                    <strong><?php echo $statusTotals['completed']; ?></strong>
+                    <small>Visits today</small>
+                </div>
             </div>
-        </div>
-        <div class="reception-flow-card">
-            <span class="flow-number">3</span>
-            <div>
-                <strong>Update status</strong>
-                <span>Mark visits completed or declined after front desk review.</span>
-            </div>
+            <?php if (!empty($activeQueueAppointments)): ?>
+                <div class="compact-queue-list">
+                    <?php foreach (array_slice($activeQueueAppointments, 0, 4) as $queueAppointment): ?>
+                        <?php $queueDoctorFlow = $queueAppointment['doctor_flow']; ?>
+                        <a class="compact-queue-item" href="view_appointments.php?highlight=<?php echo (int) ($queueAppointment['id'] ?? 0); ?>">
+                            <span class="queue-time"><?php echo receptionist_time_label($queueAppointment['appointment_time']); ?></span>
+                            <div class="queue-patient">
+                                <?php echo renderPatientAvatar($queueAppointment, ['size' => 'sm']); ?>
+                                <div class="queue-patient-copy">
+                                    <strong><?php echo htmlspecialchars($queueAppointment['patient_name']); ?></strong>
+                                    <span><?php echo htmlspecialchars(receptionist_calendar_service_label($queueAppointment)); ?> | <?php echo htmlspecialchars($queueDoctorFlow['label']); ?></span>
+                                </div>
+                            </div>
+                            <span class="status-badge <?php echo htmlspecialchars(receptionist_status($queueAppointment)); ?>"><?php echo htmlspecialchars($queueAppointment['status_label']); ?></span>
+                        </a>
+                    <?php endforeach; ?>
+                </div>
+            <?php else: ?>
+                <div class="empty-state">No patients are waiting in the active queue.</div>
+            <?php endif; ?>
+        </article>
+
+        <div class="reception-sidebar-stack">
+            <article class="panel operations-panel">
+                <div class="operations-panel-head">
+                    <div>
+                        <h2>Next patient</h2>
+                        <p>Current queue priority for front desk review.</p>
+                    </div>
+                </div>
+                <?php if ($nextAppointment): ?>
+                    <?php $nextDoctorFlow = $nextAppointment['doctor_flow']; ?>
+                    <div class="next-patient-card">
+                        <div class="next-patient-topline">
+                            <span class="next-patient-label"><?php echo htmlspecialchars($nextAppointment['queue_timing_label']); ?></span>
+                            <span class="status-badge <?php echo htmlspecialchars(receptionist_status($nextAppointment)); ?>"><?php echo htmlspecialchars($nextAppointment['status_label']); ?></span>
+                        </div>
+                        <div class="next-patient-identity">
+                            <?php echo renderPatientAvatar($nextAppointment, ['size' => 'md']); ?>
+                            <div>
+                                <h3 class="next-patient-name"><?php echo htmlspecialchars($nextAppointment['patient_name'] ?? 'Patient'); ?></h3>
+                                <p class="next-patient-service"><?php echo htmlspecialchars(receptionist_calendar_service_label($nextAppointment)); ?></p>
+                            </div>
+                        </div>
+                        <div class="next-patient-details">
+                            <div class="next-patient-detail">
+                                <span>Appointment time</span>
+                                <strong><?php echo receptionist_time_label($nextAppointment['appointment_time']); ?></strong>
+                            </div>
+                            <div class="next-patient-detail">
+                                <span>Doctor</span>
+                                <strong><?php echo htmlspecialchars($nextAppointment['doctor_name'] ?: 'For clinic assignment'); ?></strong>
+                            </div>
+                            <div class="next-patient-detail">
+                                <span>Contact</span>
+                                <strong><?php echo htmlspecialchars($nextAppointment['patient_phone'] ?: 'No phone on file'); ?></strong>
+                            </div>
+                            <div class="next-patient-detail">
+                                <span>Care flow</span>
+                                <strong><?php echo htmlspecialchars($nextDoctorFlow['label']); ?></strong>
+                            </div>
+                        </div>
+                        <a class="next-patient-open" href="view_appointments.php?highlight=<?php echo (int) ($nextAppointment['id'] ?? 0); ?>">Open appointment</a>
+                    </div>
+                <?php else: ?>
+                    <div class="empty-state">No next patient in the queue.</div>
+                <?php endif; ?>
+            </article>
+
+            <article class="panel operations-panel">
+                <div class="operations-panel-head">
+                    <div>
+                        <h2>Notifications</h2>
+                        <p>Latest booking and clinic updates.</p>
+                    </div>
+                    <span class="notification-count"><?php echo $receptionUnreadNotifications; ?></span>
+                </div>
+                <?php if (empty($receptionNotifications)): ?>
+                    <div class="empty-state">No new notifications.</div>
+                <?php else: ?>
+                    <div class="dashboard-notification-list">
+                        <?php foreach (array_slice($receptionNotifications, 0, 2) as $notification): ?>
+                            <a class="dashboard-notification-item<?php echo empty($notification['read_at']) ? ' is-unread' : ''; ?>" href="<?php echo htmlspecialchars((string) ($notification['target_url'] ?? 'clinic_notifications.php')); ?>">
+                                <strong><?php echo htmlspecialchars((string) ($notification['title'] ?? 'Clinic update')); ?></strong>
+                                <span><?php echo htmlspecialchars(receptionist_short_text((string) ($notification['message'] ?? ''), 100)); ?></span>
+                            </a>
+                        <?php endforeach; ?>
+                    </div>
+                <?php endif; ?>
+            </article>
         </div>
     </section>
 
@@ -1813,69 +2301,55 @@ include 'includes/header.php';
         <div class="panel">
             <div class="panel-head">
                 <div>
-                    <h2>Next patient</h2>
-                    <p>Current queue priority</p>
+                    <h2>Upcoming appointments</h2>
+                    <p>Pending and confirmed appointments from today onward.</p>
                 </div>
+                <a class="operations-link" href="view_appointments.php">View all</a>
             </div>
 
-            <?php if ($nextAppointment): ?>
-                <?php $nextDoctorFlow = $nextAppointment['doctor_flow']; ?>
-                <div class="next-patient">
-                    <div style="margin-bottom:10px"><?php echo renderPatientAvatarWithName($nextAppointment, ['size' => 'lg', 'link' => true, 'patient_id' => (int) $nextAppointment['patient_id']]); ?></div>
-                    <div class="next-patient-meta">
-                        <span class="queue-note"><?php echo htmlspecialchars($nextAppointment['queue_timing_label']); ?></span>
-                        <span class="doctor-flow <?php echo htmlspecialchars($nextDoctorFlow['class']); ?>"><?php echo htmlspecialchars($nextDoctorFlow['label']); ?></span>
-                    </div>
-                    <div class="detail-grid">
-                        <div class="detail-pill">
-                            <span>Time</span>
-                            <strong><?php echo receptionist_time_label($nextAppointment['appointment_time']); ?></strong>
-                        </div>
-                        <div class="detail-pill">
-                            <span>Doctor</span>
-                            <strong><?php echo htmlspecialchars($nextAppointment['doctor_name'] ?: 'Not assigned'); ?></strong>
-                        </div>
-                        <div class="detail-pill">
-                            <span>Doctor note</span>
-                            <strong><?php echo htmlspecialchars($nextDoctorFlow['detail']); ?></strong>
-                        </div>
-                        <div class="detail-pill">
-                            <span>Phone</span>
-                            <strong><?php echo htmlspecialchars($nextAppointment['patient_phone'] ?: 'No phone'); ?></strong>
-                        </div>
-                        <div class="detail-pill">
-                            <span>Notes</span>
-                            <strong><?php echo htmlspecialchars(trim((string) ($nextAppointment['notes'] ?? '')) ?: 'None'); ?></strong>
-                        </div>
-                    </div>
-                </div>
+            <?php if (empty($upcomingAppointments)): ?>
+                <div class="empty-state">No upcoming appointments to review.</div>
             <?php else: ?>
-                <div class="empty-state">No pending or confirmed appointments in the queue.</div>
+                <div class="upcoming-list">
+                    <?php foreach (array_slice($upcomingAppointments, 0, 6) as $appointment): ?>
+                        <?php $appointmentStatus = receptionist_status($appointment); ?>
+                        <a class="compact-upcoming-item" href="view_appointments.php?highlight=<?php echo (int) ($appointment['id'] ?? 0); ?>">
+                            <span class="queue-time"><?php echo receptionist_time_label($appointment['appointment_time']); ?></span>
+                            <div class="upcoming-patient">
+                                <?php echo renderPatientAvatar($appointment, ['size' => 'sm']); ?>
+                                <div class="upcoming-patient-copy">
+                                    <strong><?php echo htmlspecialchars($appointment['patient_name'] ?? 'Patient'); ?></strong>
+                                    <span><?php echo htmlspecialchars(receptionist_date_label($appointment['appointment_date'])); ?> | <?php echo htmlspecialchars(receptionist_calendar_service_label($appointment)); ?></span>
+                                </div>
+                            </div>
+                            <span class="status-badge <?php echo htmlspecialchars($appointmentStatus); ?>"><?php echo htmlspecialchars($appointment['status_label']); ?></span>
+                        </a>
+                    <?php endforeach; ?>
+                </div>
             <?php endif; ?>
         </div>
 
         <div class="panel">
             <div class="panel-head">
                 <div>
-                    <h2>Ready for nurse/doctor</h2>
-                    <p>Confirmed patients ready for clinic flow</p>
+                    <h2>Recent activity</h2>
+                    <p>Latest changes that affect the front desk.</p>
                 </div>
-                <a class="dashboard-btn secondary" href="view_appointments.php">View appointments</a>
+                <a class="operations-link" href="clinic_notifications.php">View notifications</a>
             </div>
 
-            <?php if (empty($confirmedAppointments)): ?>
-                <div class="empty-state">No confirmed patients waiting right now.</div>
+            <?php if (empty($recentActivities)): ?>
+                <div class="empty-state">No recent activity yet.</div>
             <?php else: ?>
-                <div class="handoff-list">
-                    <?php foreach (array_slice($confirmedAppointments, 0, 4) as $appointment): ?>
-                        <div class="handoff-item" style="display:flex;align-items:center;gap:10px">
-                            <?php echo renderPatientAvatar($appointment, ['size' => 'sm', 'link' => true, 'patient_id' => (int) $appointment['patient_id']]); ?>
+                <div class="activity-list">
+                    <?php foreach ($recentActivities as $activity): ?>
+                        <a class="activity-item" href="<?php echo htmlspecialchars((string) ($activity['target_url'] ?? 'clinic_notifications.php')); ?>">
                             <div>
-                                <strong><?php echo htmlspecialchars($appointment['patient_name']); ?></strong>
-                                <span><?php echo htmlspecialchars($appointment['doctor_name'] ?: 'Not assigned'); ?></span>
+                                <strong><?php echo htmlspecialchars((string) ($activity['title'] ?? 'Clinic update')); ?></strong>
+                                <span><?php echo htmlspecialchars(receptionist_short_text((string) ($activity['message'] ?? ''), 88)); ?></span>
                             </div>
-                            <span><?php echo receptionist_time_label($appointment['appointment_time']); ?></span>
-                        </div>
+                            <time class="activity-date" datetime="<?php echo htmlspecialchars((string) ($activity['created_at'] ?? '')); ?>"><?php echo !empty($activity['created_at']) ? htmlspecialchars(date('M j', strtotime((string) $activity['created_at']))) : ''; ?></time>
+                        </a>
                     <?php endforeach; ?>
                 </div>
             <?php endif; ?>

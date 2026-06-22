@@ -12,6 +12,67 @@ function ensurePatientProfilePhotoColumn(mysqli $conn): void {
     if (!patientProfileColumnExists($conn, 'profile_updated_at')) {
         $conn->query("ALTER TABLE users ADD COLUMN profile_updated_at DATETIME DEFAULT NULL");
     }
+    if (!patientProfileColumnExists($conn, 'first_name')) {
+        $conn->query("ALTER TABLE users ADD COLUMN first_name VARCHAR(40) DEFAULT NULL AFTER full_name");
+    }
+    if (!patientProfileColumnExists($conn, 'middle_name')) {
+        $conn->query("ALTER TABLE users ADD COLUMN middle_name VARCHAR(10) DEFAULT NULL AFTER first_name");
+    }
+    if (!patientProfileColumnExists($conn, 'last_name')) {
+        $conn->query("ALTER TABLE users ADD COLUMN last_name VARCHAR(40) DEFAULT NULL AFTER middle_name");
+    }
+    if (!patientProfileColumnExists($conn, 'suffix')) {
+        $conn->query("ALTER TABLE users ADD COLUMN suffix VARCHAR(10) DEFAULT NULL AFTER last_name");
+    }
+}
+
+function patientProfileNormalizeNamePart(?string $value, bool $allowSeparators = false, bool $forceUppercase = false): string {
+    $value = trim((string) $value);
+    if ($value === '') {
+        return '';
+    }
+
+    $value = preg_replace('/\s+/u', ' ', $value) ?? $value;
+    $pattern = $allowSeparators ? '/[^\p{L}\s\'-]/u' : '/[^\p{L}]/u';
+    $value = preg_replace($pattern, '', $value) ?? '';
+
+    if ($forceUppercase) {
+        $value = function_exists('mb_strtoupper') ? mb_strtoupper($value, 'UTF-8') : strtoupper($value);
+    }
+
+    return trim($value);
+}
+
+function patientProfileTitleCaseNamePart(?string $value, bool $allowSeparators = false): string {
+    $value = patientProfileNormalizeNamePart($value, $allowSeparators, false);
+    if ($value === '') {
+        return '';
+    }
+
+    return function_exists('mb_convert_case')
+        ? mb_convert_case($value, MB_CASE_TITLE, 'UTF-8')
+        : ucwords(strtolower($value));
+}
+
+function patientProfileUppercaseNamePart(?string $value, bool $allowSeparators = false): string {
+    $value = patientProfileNormalizeNamePart($value, $allowSeparators, false);
+    if ($value === '') {
+        return '';
+    }
+
+    return function_exists('mb_strtoupper')
+        ? mb_strtoupper($value, 'UTF-8')
+        : strtoupper($value);
+}
+
+function patientProfileBuildFullNameFromParts(array $row): string {
+    $first = patientProfileTitleCaseNamePart($row['first_name'] ?? '', true);
+    $middle = patientProfileUppercaseNamePart($row['middle_name'] ?? '', false);
+    $last = patientProfileTitleCaseNamePart($row['last_name'] ?? '', true);
+    $suffix = patientProfileUppercaseNamePart($row['suffix'] ?? '', false);
+
+    $parts = array_filter([$first, $middle, $last, $suffix], static fn ($part) => $part !== '');
+    return trim(implode(' ', $parts));
 }
 
 function patientProfileInitials(?string $name): string {
@@ -177,7 +238,7 @@ function patientProfilePhotoUrl(?string $path, ?string $updatedAt = null): ?stri
 
 function patientProfileHeaderDetails(mysqli $conn, int $patientId, string $fallbackName = 'Patient'): array {
     ensurePatientProfilePhotoColumn($conn);
-    $stmt = $conn->prepare('SELECT full_name, profile_photo, profile_updated_at FROM users WHERE id = ? AND role = ? LIMIT 1');
+    $stmt = $conn->prepare('SELECT full_name, first_name, middle_name, last_name, suffix, profile_photo, profile_updated_at FROM users WHERE id = ? AND role = ? LIMIT 1');
     if (!$stmt) {
         return [
             'name' => $fallbackName,
@@ -192,7 +253,10 @@ function patientProfileHeaderDetails(mysqli $conn, int $patientId, string $fallb
     $row = $stmt->get_result()->fetch_assoc() ?: [];
     $stmt->close();
 
-    $name = trim((string) ($row['full_name'] ?? $fallbackName));
+    $name = patientProfileBuildFullNameFromParts($row);
+    if ($name === '') {
+        $name = trim((string) ($row['full_name'] ?? $fallbackName));
+    }
     if ($name === '') {
         $name = 'Patient';
     }
@@ -207,15 +271,52 @@ function patientProfileHeaderDetails(mysqli $conn, int $patientId, string $fallb
 
 function updatePatientUserProfile(mysqli $conn, int $patientId, array $fields, ?string $photoPath, bool $removePhoto = false): array {
     ensurePatientProfilePhotoColumn($conn);
-    $sql = "UPDATE users SET full_name=?, email=?, phone=?, gender=?, date_of_birth=?, age=?, civil_status=?, address=?, barangay=?, city=?, emergency_contact_name=?, emergency_contact_relationship=?, emergency_contact_number=?, profile_photo=?, profile_updated_at=NOW() WHERE id=? AND role='patient'";
+    $sql = "UPDATE users SET first_name=?, middle_name=?, last_name=?, suffix=?, email=?, phone=?, gender=?, date_of_birth=?, age=?, civil_status=?, address=?, barangay=?, city=?, emergency_contact_name=?, emergency_contact_relationship=?, emergency_contact_number=?, profile_photo=?, profile_updated_at=NOW() WHERE id=? AND role='patient'";
     $stmt = $conn->prepare($sql);
     if (!$stmt) {
         return ['ok' => false, 'error' => 'Could not prepare profile update.'];
     }
-    $fullName = (string) ($fields['full_name'] ?? '');
+    $firstName = patientProfileTitleCaseNamePart($fields['first_name'] ?? '', true);
+    $middleName = patientProfileUppercaseNamePart($fields['middle_name'] ?? '', false);
+    $lastName = patientProfileTitleCaseNamePart($fields['last_name'] ?? '', true);
+    $suffix = patientProfileUppercaseNamePart($fields['suffix'] ?? '', false);
+    $fullName = patientProfileBuildFullNameFromParts([
+        'first_name' => $firstName,
+        'middle_name' => $middleName,
+        'last_name' => $lastName,
+        'suffix' => $suffix,
+    ]);
+    if ($firstName === '' || $lastName === '') {
+        $stmt->close();
+        return ['ok' => false, 'error' => 'First name and last name are required.'];
+    }
+    $countLetters = static function (string $value): int {
+        if ($value === '') {
+            return 0;
+        }
+        preg_match_all('/\p{L}/u', $value, $matches);
+        return count($matches[0] ?? []);
+    };
+    if ($countLetters($firstName) > 15) {
+        $stmt->close();
+        return ['ok' => false, 'error' => 'First name must not exceed 15 letters.'];
+    }
+    if ($countLetters($middleName) > 1 || ($middleName !== '' && $countLetters($middleName) < 1)) {
+        $stmt->close();
+        return ['ok' => false, 'error' => 'Middle name must be exactly 1 letter.'];
+    }
+    if ($countLetters($lastName) > 15) {
+        $stmt->close();
+        return ['ok' => false, 'error' => 'Last name must not exceed 15 letters.'];
+    }
+    if ($suffix !== '' && $countLetters($suffix) > 3) {
+        $stmt->close();
+        return ['ok' => false, 'error' => 'Suffix must not exceed 3 letters.'];
+    }
     $fullNameLength = function_exists('mb_strlen') ? mb_strlen($fullName) : strlen($fullName);
-    if ($fullNameLength > 40) {
-        return ['ok' => false, 'error' => 'Full name must not exceed 40 characters.'];
+    if ($fullNameLength > 100) {
+        $stmt->close();
+        return ['ok' => false, 'error' => 'Full name must not exceed 100 characters.'];
     }
     $email = (string) ($fields['email'] ?? '');
     $phone = (string) ($fields['phone'] ?? '');
@@ -230,7 +331,28 @@ function updatePatientUserProfile(mysqli $conn, int $patientId, array $fields, ?
     $emRel = (string) ($fields['emergency_contact_relationship'] ?? '');
     $emNum = (string) ($fields['emergency_contact_number'] ?? '');
     $photo = $removePhoto ? null : $photoPath;
-    $stmt->bind_param('ssssssssssssssi', $fullName, $email, $phone, $gender, $dob, $age, $civil, $address, $barangay, $city, $emName, $emRel, $emNum, $photo, $patientId);
+    $bindTypes = str_repeat('s', 17) . 'i';
+    $stmt->bind_param(
+        $bindTypes,
+        $firstName,
+        $middleName,
+        $lastName,
+        $suffix,
+        $email,
+        $phone,
+        $gender,
+        $dob,
+        $age,
+        $civil,
+        $address,
+        $barangay,
+        $city,
+        $emName,
+        $emRel,
+        $emNum,
+        $photo,
+        $patientId
+    );
     if (!$stmt->execute()) {
         $stmt->close();
         return ['ok' => false, 'error' => 'Could not update profile.'];
@@ -249,7 +371,10 @@ function patientAvatarStyles(): string {
 }
 
 function renderPatientAvatar(array $patient, array $options = []): string {
-    $name = (string) ($patient['full_name'] ?? $patient['patient_name'] ?? 'Patient');
+    $name = patientProfileBuildFullNameFromParts($patient);
+    if ($name === '') {
+        $name = (string) ($patient['full_name'] ?? $patient['patient_name'] ?? 'Patient');
+    }
     $size = (string) ($options['size'] ?? 'md');
     $photo = patientProfilePhotoUrl($patient['profile_photo'] ?? null, $patient['profile_updated_at'] ?? null);
     $initials = patientProfileInitials($name);
@@ -267,7 +392,10 @@ function renderPatientAvatar(array $patient, array $options = []): string {
 }
 
 function renderPatientAvatarWithName(array $patient, array $options = []): string {
-    $name = (string) ($patient['full_name'] ?? $patient['patient_name'] ?? 'Patient');
+    $name = patientProfileBuildFullNameFromParts($patient);
+    if ($name === '') {
+        $name = (string) ($patient['full_name'] ?? $patient['patient_name'] ?? 'Patient');
+    }
     $meta = (string) ($patient['username'] ?? $patient['phone'] ?? '');
     $avatar = renderPatientAvatar($patient, $options);
     return '<span class="patient-avatar-wrap">' . $avatar . '<span class="patient-avatar-name"><strong>' . htmlspecialchars($name) . '</strong>' . ($meta !== '' ? '<small>' . htmlspecialchars($meta) . '</small>' : '') . '</span></span>';
@@ -276,7 +404,7 @@ function renderPatientAvatarWithName(array $patient, array $options = []): strin
 function fetchPatientsForStaffDirectory(mysqli $conn): array {
     ensurePatientProfilePhotoColumn($conn);
     $rows = [];
-    $result = $conn->query("SELECT id, full_name, username, email, phone, profile_photo, profile_updated_at FROM users WHERE role='patient' ORDER BY full_name ASC LIMIT 300");
+    $result = $conn->query("SELECT id, full_name, first_name, middle_name, last_name, suffix, username, email, phone, profile_photo, profile_updated_at FROM users WHERE role='patient' ORDER BY full_name ASC LIMIT 300");
     if ($result) {
         while ($row = $result->fetch_assoc()) {
             $rows[] = $row;

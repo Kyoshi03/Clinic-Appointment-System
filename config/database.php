@@ -1,6 +1,8 @@
 <?php
 mysqli_report(MYSQLI_REPORT_OFF);
 
+require_once __DIR__ . '/../includes/name_parts.php';
+
 function dbIsLiveHost(): bool {
     $host = strtolower($_SERVER['HTTP_HOST'] ?? '');
     return $host !== ''
@@ -180,6 +182,81 @@ function dbTableWorks(mysqli $conn, string $table): bool {
     }
 }
 
+function dbUsersFullNameExpression(): string {
+    return "TRIM(CONCAT_WS(' ', NULLIF(first_name, ''), NULLIF(middle_name, ''), NULLIF(last_name, ''), NULLIF(suffix, '')))";
+}
+
+function dbBackfillUsersNameParts(mysqli $conn): void {
+    $requiredColumns = ['full_name', 'first_name', 'middle_name', 'last_name', 'suffix'];
+    foreach ($requiredColumns as $column) {
+        $check = $conn->query("SHOW COLUMNS FROM users LIKE '" . $conn->real_escape_string($column) . "'");
+        if (!$check || $check->num_rows === 0) {
+            return;
+        }
+    }
+
+    $result = $conn->query("SELECT id, full_name, first_name, middle_name, last_name, suffix FROM users ORDER BY id ASC");
+    if (!$result) {
+        return;
+    }
+
+    $update = $conn->prepare("UPDATE users SET first_name = ?, middle_name = ?, last_name = ?, suffix = ? WHERE id = ?");
+    if (!$update) {
+        return;
+    }
+
+    while ($row = $result->fetch_assoc()) {
+        $parsed = clinic_name_split_full_name((string) ($row['full_name'] ?? ''));
+
+        $firstName = trim((string) ($row['first_name'] ?? ''));
+        $middleName = trim((string) ($row['middle_name'] ?? ''));
+        $lastName = trim((string) ($row['last_name'] ?? ''));
+        $suffix = trim((string) ($row['suffix'] ?? ''));
+
+        $newFirstName = $firstName !== '' ? $firstName : $parsed['first_name'];
+        $newMiddleName = $middleName !== '' ? $middleName : $parsed['middle_name'];
+        $newLastName = $lastName !== '' ? $lastName : $parsed['last_name'];
+        $newSuffix = $suffix !== '' ? $suffix : $parsed['suffix'];
+
+        if ($newFirstName === $firstName && $newMiddleName === $middleName && $newLastName === $lastName && $newSuffix === $suffix) {
+            continue;
+        }
+
+        $id = (int) $row['id'];
+        $update->bind_param('ssssi', $newFirstName, $newMiddleName, $newLastName, $newSuffix, $id);
+        $update->execute();
+    }
+
+    $update->close();
+}
+
+function dbEnsureGeneratedUsersFullNameColumn(mysqli $conn): void {
+    $columnResult = $conn->query("SHOW COLUMNS FROM users LIKE 'full_name'");
+    $columnInfo = $columnResult ? $columnResult->fetch_assoc() : null;
+    // Keep this generated display value out of phpMyAdmin's normal table view.
+    // The separate name fields are the editable source of truth.
+    $generatedDefinition = "VARCHAR(100) GENERATED ALWAYS AS (" . dbUsersFullNameExpression() . ") STORED INVISIBLE";
+
+    if (!$columnInfo) {
+        $conn->query("ALTER TABLE users ADD COLUMN full_name {$generatedDefinition} AFTER suffix");
+        return;
+    }
+
+    $extra = strtolower((string) ($columnInfo['Extra'] ?? ''));
+    $createTable = $conn->query('SHOW CREATE TABLE users');
+    $createInfo = $createTable ? $createTable->fetch_assoc() : [];
+    $createSql = strtolower((string) ($createInfo['Create Table'] ?? ''));
+    $isInvisible = strpos($createSql, '`full_name`') !== false
+        && strpos($createSql, 'invisible') !== false;
+
+    if (strpos($extra, 'generated') === false) {
+        dbBackfillUsersNameParts($conn);
+        $conn->query("ALTER TABLE users MODIFY COLUMN full_name {$generatedDefinition} AFTER suffix");
+    } elseif (!$isInvisible) {
+        $conn->query("ALTER TABLE users MODIFY COLUMN full_name {$generatedDefinition} AFTER suffix");
+    }
+}
+
 function dbDropTableIfPresent(mysqli $conn, string $table): void {
     $table = $conn->real_escape_string($table);
 
@@ -243,7 +320,11 @@ function initDatabase() {
         id INT AUTO_INCREMENT PRIMARY KEY,
         username VARCHAR(50) UNIQUE NOT NULL,
         password VARCHAR(255) NOT NULL,
-        full_name VARCHAR(100) NOT NULL,
+        first_name VARCHAR(40) DEFAULT NULL,
+        middle_name VARCHAR(10) DEFAULT NULL,
+        last_name VARCHAR(40) DEFAULT NULL,
+        suffix VARCHAR(10) DEFAULT NULL,
+        full_name VARCHAR(100) GENERATED ALWAYS AS (TRIM(CONCAT_WS(' ', NULLIF(first_name, ''), NULLIF(middle_name, ''), NULLIF(last_name, ''), NULLIF(suffix, '')))) STORED INVISIBLE,
         role ENUM('admin', 'nurse', 'receptionist', 'patient', 'doctor') NOT NULL,
         email VARCHAR(100),
         phone VARCHAR(20),
@@ -262,6 +343,10 @@ function initDatabase() {
     
     // Add new columns if they don't exist (for existing databases)
     $columns_to_add = [
+        ['first_name', "VARCHAR(40) DEFAULT NULL", 'password'],
+        ['middle_name', "VARCHAR(10) DEFAULT NULL", 'first_name'],
+        ['last_name', "VARCHAR(40) DEFAULT NULL", 'middle_name'],
+        ['suffix', "VARCHAR(10) DEFAULT NULL", 'last_name'],
         ['gender', "ENUM('Male', 'Female', 'Other') DEFAULT NULL", 'phone'],
         ['date_of_birth', 'DATE DEFAULT NULL', 'gender'],
         ['age', 'INT DEFAULT NULL', 'date_of_birth'],
@@ -281,6 +366,8 @@ function initDatabase() {
             $conn->query("ALTER TABLE users ADD COLUMN {$col[0]} {$col[1]} {$after}");
         }
     }
+
+    dbEnsureGeneratedUsersFullNameColumn($conn);
 
     $emailColumn = $conn->query("SHOW COLUMNS FROM users LIKE 'email'");
     $emailInfo = $emailColumn ? $emailColumn->fetch_assoc() : null;

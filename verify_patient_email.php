@@ -112,6 +112,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             } else {
                 $passwordHash = (string) $patient['password'];
                 $fullName = (string) $patient['full_name'];
+                $firstName = (string) ($patient['first_name'] ?? '');
+                $middleName = (string) ($patient['middle_name'] ?? '');
+                $lastName = (string) ($patient['last_name'] ?? '');
+                $suffix = (string) ($patient['suffix'] ?? '');
                 $role = (string) $patient['role'];
                 $phone = (string) $patient['phone'];
                 $gender = (string) $patient['gender'];
@@ -126,17 +130,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $emergencyNumber = (string) $patient['emergency_contact_number'];
                 $insert = $conn->prepare(
                     'INSERT INTO users (
-                        username, password, full_name, role, email, phone, gender,
+                        username, password, first_name, middle_name, last_name, suffix, role, email, phone, gender,
                         date_of_birth, age, civil_status, address, barangay, city,
                         emergency_contact_name, emergency_contact_relationship,
                         emergency_contact_number
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
                 );
+                                $bindTypes = str_repeat('s', 11) . 'i' . str_repeat('s', 7);
                 $insert->bind_param(
-                    'ssssssssisssssss',
+                    $bindTypes,
                     $username,
                     $passwordHash,
-                    $fullName,
+                    $firstName,
+                    $middleName,
+                    $lastName,
+                    $suffix,
                     $role,
                     $emailForInsert,
                     $phone,

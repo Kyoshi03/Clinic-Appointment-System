@@ -1,7 +1,7 @@
 <?php
 /**
  * Clinic doctor accounts + availability windows.
- * day_of_week: 1 = Monday … 7 = Sunday (ISO-8601, PHP date('N')).
+ * day_of_week: 1 = Monday â€¦ 7 = Sunday (ISO-8601, PHP date('N')).
  */
 
 function doctor_sched_column_exists(mysqli $conn, string $table, string $column): bool {
@@ -55,7 +55,10 @@ function init_doctor_schema_and_accounts(mysqli $conn): void {
     $doctors = [
         [
             'username' => 'dra.encina',
-            'full_name' => 'Dra. Vunelyn Encina',
+            'first_name' => 'Vunelyn',
+            'middle_name' => '',
+            'last_name' => 'Encina',
+            'suffix' => '',
             'specialty' => 'Clinic Doctor',
             'email' => 'dra.encina@globalife.local',
             'phone' => '',
@@ -67,7 +70,10 @@ function init_doctor_schema_and_accounts(mysqli $conn): void {
         ],
         [
             'username' => 'dra.casas',
-            'full_name' => 'Dra. Enely Casas',
+            'first_name' => 'Enely',
+            'middle_name' => '',
+            'last_name' => 'Casas',
+            'suffix' => '',
             'specialty' => 'Clinic Doctor',
             'email' => 'dra.casas@globalife.local',
             'phone' => '',
@@ -79,7 +85,10 @@ function init_doctor_schema_and_accounts(mysqli $conn): void {
         ],
         [
             'username' => 'dra.mojica',
-            'full_name' => 'Dra. Marlin Mojica',
+            'first_name' => 'Marlin',
+            'middle_name' => '',
+            'last_name' => 'Mojica',
+            'suffix' => '',
             'specialty' => 'Clinic Doctor',
             'email' => 'dra.mojica@globalife.local',
             'phone' => '',
@@ -91,7 +100,10 @@ function init_doctor_schema_and_accounts(mysqli $conn): void {
         ],
         [
             'username' => 'dra.tebelin',
-            'full_name' => 'Dra. Roda Tebelin',
+            'first_name' => 'Roda',
+            'middle_name' => '',
+            'last_name' => 'Tebelin',
+            'suffix' => '',
             'specialty' => 'Clinic Doctor',
             'email' => 'dra.tebelin@globalife.local',
             'phone' => '',
@@ -103,7 +115,10 @@ function init_doctor_schema_and_accounts(mysqli $conn): void {
         ],
         [
             'username' => 'dra.aberia',
-            'full_name' => 'Dra. Michelle Aberia',
+            'first_name' => 'Michelle',
+            'middle_name' => '',
+            'last_name' => 'Aberia',
+            'suffix' => '',
             'specialty' => 'Clinic Doctor',
             'email' => 'dra.aberia@globalife.local',
             'phone' => '',
@@ -124,13 +139,13 @@ function init_doctor_schema_and_accounts(mysqli $conn): void {
 
         if ($ex) {
             $uid = (int) $ex['id'];
-            $up = $conn->prepare("UPDATE users SET full_name = ?, role = 'doctor', specialty = ?, email = ?, phone = ? WHERE id = ?");
-            $up->bind_param('ssssi', $d['full_name'], $d['specialty'], $d['email'], $d['phone'], $uid);
+            $up = $conn->prepare("UPDATE users SET first_name = ?, middle_name = ?, last_name = ?, suffix = ?, role = 'doctor', specialty = ?, email = ?, phone = ? WHERE id = ?");
+            $up->bind_param('sssssssi', $d['first_name'], $d['middle_name'], $d['last_name'], $d['suffix'], $d['specialty'], $d['email'], $d['phone'], $uid);
             $up->execute();
             $up->close();
         } else {
-            $ins = $conn->prepare("INSERT INTO users (username, password, full_name, role, specialty, email, phone, is_active) VALUES (?, ?, ?, 'doctor', ?, ?, ?, 1)");
-            $ins->bind_param('ssssss', $d['username'], $defaultPass, $d['full_name'], $d['specialty'], $d['email'], $d['phone']);
+            $ins = $conn->prepare("INSERT INTO users (username, password, first_name, middle_name, last_name, suffix, role, specialty, email, phone, is_active) VALUES (?, ?, ?, ?, ?, ?, 'doctor', ?, ?, ?, ?, 1)");
+            $ins->bind_param('sssssssss', $d['username'], $defaultPass, $d['first_name'], $d['middle_name'], $d['last_name'], $d['suffix'], $d['specialty'], $d['email'], $d['phone']);
             $ins->execute();
             $uid = (int) $conn->insert_id;
             $ins->close();

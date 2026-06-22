@@ -36,6 +36,10 @@ foreach ($defaults as $k => $v) {
     }
 }
 $bk['price_channel'] = 'opd';
+if (($bk['type'] ?? '') === 'consultation') {
+    // Doctor assignment happens at the clinic; the calendar uses one shared daily capacity.
+    $bk['doctor_id'] = null;
+}
 
 if (isset($_GET['step_back'])) {
     $cur = (int) ($bk['step'] ?? 1);
@@ -319,15 +323,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
             } elseif ($t === '') {
                 $error = 'There is no remaining availability on the selected date. Please choose another date.';
-            } elseif (
-                $bk['type'] === 'consultation'
-                && !empty($bk['doctor_id'])
-                && appointment_doctor_day_capacity($conn, (int) $bk['doctor_id'], $d)['is_full']
-            ) {
-                $capacity = appointment_doctor_day_capacity($conn, (int) $bk['doctor_id'], $d);
-                $error = 'This doctor is fully booked on the selected date ('
+            } elseif ($bk['type'] === 'consultation' && appointment_consultation_day_capacity($conn, $d)['is_full']) {
+                $capacity = appointment_consultation_day_capacity($conn, $d);
+                $error = 'Doctor consultations are fully booked on the selected date ('
                     . $capacity['booked'] . '/' . $capacity['limit']
-                    . ' appointments). Please choose another date.';
+                    . ' bookings). Please choose another date.';
             } elseif ($bk['type'] !== 'consultation' && appointment_lab_day_capacity($conn, $d)['is_full']) {
                 $capacity = appointment_lab_day_capacity($conn, $d);
                 $error = 'Laboratory appointments are fully booked on the selected date ('
@@ -336,13 +336,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             } elseif (!appointment_clinic_is_open_at($d, $t)) {
                 $error = 'The clinic is closed on the selected date. Please choose another date.';
             } else {
-                if (
-                    $bk['type'] === 'consultation'
-                    && !empty($bk['doctor_id'])
-                    && !user_is_doctor_available_at($conn, (int) $bk['doctor_id'], $d, $t)
-                ) {
-                    $error = 'Choose a date within the selected doctor\'s clinic schedule.';
-                } elseif ($bk['type'] !== 'consultation') {
+                if ($bk['type'] !== 'consultation') {
                     $bk['doctor_id'] = null;
                 }
             }
@@ -568,6 +562,8 @@ $calendarDoctorDayCounts = appointment_doctor_daily_counts_between(
     array_keys($calendarDoctorIds)
 );
 $doctorDailyLimit = appointment_doctor_daily_limit();
+$calendarConsultationDayCounts = appointment_consultation_daily_counts_between($conn, $calendarStartValue, $calendarMonthEnd);
+$consultationDailyLimit = appointment_consultation_daily_limit();
 $calendarLabDayCounts = appointment_lab_daily_counts_between($conn, $calendarStartValue, $calendarMonthEnd);
 $labDailyLimit = appointment_lab_daily_limit();
 $conn->close();
@@ -879,20 +875,10 @@ $stepLabels = [
                                     <span class="cal-date-number"><?php echo $day; ?></span>
                                     <div class="calendar-events">
                                         <?php if (!$disabled): ?>
-                                            <?php if ($clinicOpen): ?>
-                                                <small class="clinic-hours-event">
-                                                    <span class="clinic-hours-label">Clinic open</span>
-                                                </small>
-                                            <?php else: ?>
+                                            <?php if (!$clinicOpen): ?>
                                                 <small class="clinic-closed-event">Clinic closed</small>
                                             <?php endif; ?>
                                             <?php if ($clinicOpen): ?>
-                                            <?php if (!empty($dayCapacityRows)): ?>
-                                                <small class="capacity-event<?php echo $dayAllDoctorsFull ? ' is-full' : ''; ?>">
-                                                    <strong><?php echo $dayAllDoctorsFull ? 'Fully booked' : $dayBookedTotal . ' appointments'; ?></strong>
-                                                    <span><?php echo count($dayCapacityRows) - $dayFullDoctors; ?> doctor(s) with space</span>
-                                                </small>
-                                            <?php endif; ?>
                                             <?php foreach (array_slice($doctorSlots, 0, 2) as $slot): ?>
                                                 <?php
                                                 $slotBooked = (int) ($calendarDoctorDayCounts[(int) $slot['id']][$dateValue] ?? 0);
@@ -1251,7 +1237,7 @@ $stepLabels = [
             <div class="info-box">
                 <strong>Step 4 - Appointment schedule.</strong>
                 <?php if ($bk['type'] === 'consultation' && $selectedDoctor): ?>
-                    Choose a date when <?php echo htmlspecialchars((string) $selectedDoctor['full_name']); ?> is available.
+                    Choose an open clinic date for your doctor consultation.
                 <?php elseif ($bk['type'] === 'consultation'): ?>
                     Choose an open clinic date for your consultation.
                 <?php else: ?>
@@ -1270,7 +1256,7 @@ $stepLabels = [
                                     <strong><?php echo htmlspecialchars($calendarMonthLabel); ?></strong>
                                     <a href="book_appointment.php?calendar_month=<?php echo urlencode($calendarNextMonth); ?>" aria-label="Next month">&rsaquo;</a>
                                 </div>
-                                <span><?php echo $bk['type'] === 'consultation' ? 'Doctor availability' : 'Pick a visit date'; ?></span>
+                                <span><?php echo $bk['type'] === 'consultation' ? 'Consultation capacity' : 'Pick a visit date'; ?></span>
                             </div>
                             <div class="cal-grid" id="appointmentCalendar">
                                 <?php foreach (['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as $dow): ?>
@@ -1285,26 +1271,17 @@ $stepLabels = [
                                     $dateDayOfWeek = (int) date('N', strtotime($dateValue));
                                     $clinicOpen = $dateDayOfWeek >= 1 && $dateDayOfWeek <= 6;
                                     $doctorSlots = $calendarDoctorSlotsByDow[$dateDayOfWeek] ?? [];
-                                    $consultationCapacityRows = [];
-                                    $consultationBooked = 0;
-                                    foreach ($doctorSlots as $slot) {
-                                        $slotBooked = (int) ($calendarDoctorDayCounts[(int) $slot['id']][$dateValue] ?? 0);
-                                        $consultationBooked += $slotBooked;
-                                        $consultationCapacityRows[] = [
-                                            'doctor' => (string) $slot['doctor'],
-                                            'specialty' => (string) ($slot['specialty'] ?: 'Clinic Doctor'),
-                                            'booked' => $slotBooked,
-                                            'remaining' => max(0, $doctorDailyLimit - $slotBooked),
-                                            'limit' => $doctorDailyLimit,
-                                            'full' => $slotBooked >= $doctorDailyLimit,
-                                        ];
-                                    }
-                                    $consultationLimit = max(0, count($consultationCapacityRows) * $doctorDailyLimit);
-                                    $consultationFull = !empty($consultationCapacityRows) && array_reduce(
-                                        $consultationCapacityRows,
-                                        static fn (bool $carry, array $row): bool => $carry && (bool) $row['full'],
-                                        true
-                                    );
+                                    $consultationBooked = (int) ($calendarConsultationDayCounts[$dateValue] ?? 0);
+                                    $consultationLimit = $consultationDailyLimit;
+                                    $consultationFull = $consultationBooked >= $consultationDailyLimit;
+                                    $consultationCapacityRows = [[
+                                        'doctor' => 'Doctor consultations',
+                                        'specialty' => 'Shared clinic capacity',
+                                        'booked' => $consultationBooked,
+                                        'remaining' => max(0, $consultationDailyLimit - $consultationBooked),
+                                        'limit' => $consultationDailyLimit,
+                                        'full' => $consultationFull,
+                                    ]];
                                     $labBooked = (int) ($calendarLabDayCounts[$dateValue] ?? 0);
                                     $labFull = $bk['type'] !== 'consultation' && $labBooked >= $labDailyLimit;
                                     $labCapacityRows = [[
@@ -1329,18 +1306,13 @@ $stepLabels = [
                                     if ($clinicOpen) {
                                         $classes[] = 'is-clinic-open';
                                     }
-                                    if ($bk['type'] === 'consultation' && !empty($doctorSlots)) {
-                                        $classes[] = 'has-doctor';
-                                    }
                                     if (!$clinicOpen) {
                                         $classes[] = 'is-closed';
                                     }
                                     if ($capacityFull) {
                                         $classes[] = 'is-fully-booked';
                                     }
-                                    $disabled = $dateValue < $calendarToday
-                                        || !$clinicOpen
-                                        || ($bk['type'] === 'consultation' && empty($doctorSlots));
+                                    $disabled = $dateValue < $calendarToday || !$clinicOpen;
                                     ?>
                                     <button
                                         type="button"
@@ -1360,24 +1332,11 @@ $stepLabels = [
                                                 <small class="clinic-hours-event">
                                                     <span class="clinic-hours-label">Clinic open</span>
                                                 </small>
-                                                 <?php if ($bk['type'] === 'consultation'): ?>
-                                                <?php if (empty($doctorSlots)): ?>
-                                                    <small class="clinic-closed-event">No doctor schedule</small>
-                                                <?php else: ?>
+                                                <?php if ($bk['type'] === 'consultation'): ?>
                                                     <small class="capacity-event<?php echo $consultationFull ? ' is-full' : ''; ?>">
                                                         <strong><?php echo $consultationFull ? 'Fully booked' : $consultationBooked . '/' . $consultationLimit . ' booked'; ?></strong>
                                                         <span><?php echo max(0, $consultationLimit - $consultationBooked); ?> consultation slots remaining</span>
                                                     </small>
-                                                    <?php foreach (array_slice($doctorSlots, 0, 2) as $slot): ?>
-                                                        <small class="doctor-event">
-                                                            <span class="availability-label"><?php echo htmlspecialchars($slot['specialty'] !== '' ? $slot['specialty'] : 'Available'); ?></span>
-                                                            <span class="availability-doctor"><?php echo htmlspecialchars($slot['doctor']); ?></span>
-                                                        </small>
-                                                    <?php endforeach; ?>
-                                                    <?php if (count($doctorSlots) > 2): ?>
-                                                        <small class="more-event">+<?php echo count($doctorSlots) - 2; ?> more doctors</small>
-                                                    <?php endif; ?>
-                                                <?php endif; ?>
                                                 <?php else: ?>
                                                 <small class="capacity-event<?php echo $labFull ? ' is-full' : ''; ?>">
                                                     <strong><?php echo $labFull ? 'Fully booked' : $labBooked . '/' . $labDailyLimit . ' booked'; ?></strong>
@@ -1398,10 +1357,8 @@ $stepLabels = [
                                 <strong id="selectedDateText"><?php echo $bk['appointment_date'] !== '' ? date('M d, Y', strtotime($bk['appointment_date'])) : 'Choose a date from the calendar'; ?></strong>
                             </div>
                             <p class="schedule-note">
-                                <?php if ($bk['type'] === 'consultation' && $selectedDoctor): ?>
-                                    Only dates within <?php echo htmlspecialchars((string) $selectedDoctor['full_name']); ?>'s availability can be selected.
-                                <?php elseif ($bk['type'] === 'consultation'): ?>
-                                    Consultation booking is available on open clinic dates with scheduled doctors.
+                                <?php if ($bk['type'] === 'consultation'): ?>
+                                    Doctor consultations use shared clinic slots. Up to <?php echo $consultationDailyLimit; ?> bookings are accepted each open day.
                                 <?php else: ?>
                                     Laboratory appointments are available on open clinic dates, up to <?php echo $labDailyLimit; ?> bookings per day.
                                 <?php endif; ?>
@@ -1563,8 +1520,8 @@ $stepLabels = [
                 <div class="capacity-dialog-body">
                     <div class="capacity-summary">
                         <div class="capacity-stat"><span>Appointments</span><strong id="capacityBooked">0</strong></div>
-                        <div class="capacity-stat"><span>Maximum</span><strong id="capacityLimit"><?php echo $doctorDailyLimit; ?></strong></div>
-                        <div class="capacity-stat"><span>Remaining</span><strong id="capacityRemaining"><?php echo $doctorDailyLimit; ?></strong></div>
+                        <div class="capacity-stat"><span>Maximum</span><strong id="capacityLimit"><?php echo $bk['type'] === 'consultation' ? $consultationDailyLimit : $labDailyLimit; ?></strong></div>
+                        <div class="capacity-stat"><span>Remaining</span><strong id="capacityRemaining"><?php echo $bk['type'] === 'consultation' ? $consultationDailyLimit : $labDailyLimit; ?></strong></div>
                     </div>
                     <div class="capacity-doctors" id="capacityDoctorRows"></div>
                     <p class="capacity-message" id="capacityMessage">Select an available date to continue.</p>
@@ -1633,7 +1590,7 @@ $stepLabels = [
                         var name = document.createElement('strong');
                         name.textContent = doctor.doctor || 'Appointment slots';
                         var detail = document.createElement('span');
-                        detail.textContent = (doctor.specialty || 'Clinic schedule') + ' - ' + safeNumber(doctor.booked) + '/' + safeNumber(doctor.limit) + ' appointments';
+                        detail.textContent = (doctor.specialty || 'Clinic schedule') + ' - ' + safeNumber(doctor.booked) + '/' + safeNumber(doctor.limit) + ' booked';
                         copy.appendChild(name);
                         copy.appendChild(detail);
                         var chip = document.createElement('span');

@@ -3,12 +3,16 @@ require_once 'includes/session.php';
 checkRole('receptionist');
 
 require_once 'config/database.php';
+require_once __DIR__ . '/includes/name_parts.php';
 require_once __DIR__ . '/includes/admin_notifications.php';
 
 $currentUser = getCurrentUser();
 $error = '';
 $success = '';
-$rprFullNameMax = 40;
+$rprFirstNameMax = 15;
+$rprMiddleNameMax = 1;
+$rprLastNameMax = 15;
+$rprSuffixMax = 3;
 
 function rpr_value(string $key): string {
     return isset($_POST[$key]) ? htmlspecialchars((string) $_POST[$key]) : '';
@@ -29,6 +33,10 @@ function rpr_password_requirements(string $password): array {
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $first_name = trim($_POST['first_name'] ?? '');
+    $middle_name = trim($_POST['middle_name'] ?? '');
+    $last_name = trim($_POST['last_name'] ?? '');
+    $suffix = trim($_POST['suffix'] ?? '');
     $full_name = trim($_POST['full_name'] ?? '');
     $gender = $_POST['gender'] ?? '';
     $date_of_birth = trim($_POST['date_of_birth'] ?? '');
@@ -61,12 +69,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
     
     // Validation
-    $fullNameLength = function_exists('mb_strlen') ? mb_strlen($full_name) : strlen($full_name);
+    $parsedName = clinic_name_split_full_name($full_name);
+    $first_name = $first_name !== '' ? $first_name : (string) $parsedName['first_name'];
+    $middle_name = $middle_name !== '' ? $middle_name : (string) $parsedName['middle_name'];
+    $last_name = $last_name !== '' ? $last_name : (string) $parsedName['last_name'];
+    $suffix = $suffix !== '' ? $suffix : (string) $parsedName['suffix'];
+    $display_full_name = clinic_name_build_full_name([
+        'first_name' => $first_name,
+        'middle_name' => $middle_name,
+        'last_name' => $last_name,
+        'suffix' => $suffix,
+    ]);
 
-    if (empty($full_name) || empty($gender) || empty($date_of_birth) || empty($phone) || empty($email) || empty($barangay) || empty($city) || empty($username) || empty($password) || empty($confirm_password)) {
+    $firstNameLength = clinic_name_letter_count($first_name);
+    $middleNameLength = clinic_name_letter_count($middle_name);
+    $lastNameLength = clinic_name_letter_count($last_name);
+    $suffixLength = clinic_name_letter_count($suffix);
+
+    if (empty($first_name) || empty($last_name) || empty($gender) || empty($date_of_birth) || empty($phone) || empty($email) || empty($barangay) || empty($city) || empty($username) || empty($password) || empty($confirm_password)) {
         $error = 'Please fill in all required fields.';
-    } elseif ($fullNameLength > $rprFullNameMax) {
-        $error = 'Full name must not exceed ' . $rprFullNameMax . ' characters.';
+    } elseif ($firstNameLength > $rprFirstNameMax) {
+        $error = 'First name must not exceed ' . $rprFirstNameMax . ' letters.';
+    } elseif ($middle_name !== '' && $middleNameLength !== $rprMiddleNameMax) {
+        $error = 'Middle name must be exactly 1 letter.';
+    } elseif ($lastNameLength > $rprLastNameMax) {
+        $error = 'Last name must not exceed ' . $rprLastNameMax . ' letters.';
+    } elseif ($suffix !== '' && $suffixLength > $rprSuffixMax) {
+        $error = 'Suffix must not exceed ' . $rprSuffixMax . ' letters.';
     } elseif (!$birthDateIsValid) {
         $error = 'Please enter a valid date of birth.';
     } elseif ($birthDate > new DateTime('today')) {
@@ -101,8 +130,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $role = 'patient';
             
             // Insert new patient
-            $stmt = $conn->prepare("INSERT INTO users (username, password, full_name, role, email, phone, gender, date_of_birth, age, civil_status, address, barangay, city, emergency_contact_name, emergency_contact_relationship, emergency_contact_number) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
-            $stmt->bind_param("ssssssssisssssss", $username, $hashed_password, $full_name, $role, $email, $phone, $gender, $date_of_birth, $age, $civil_status, $address, $barangay, $city, $emergency_contact_name, $emergency_contact_relationship, $emergency_contact_number);
+            $stmt = $conn->prepare("INSERT INTO users (username, password, first_name, middle_name, last_name, suffix, role, email, phone, gender, date_of_birth, age, civil_status, address, barangay, city, emergency_contact_name, emergency_contact_relationship, emergency_contact_number) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+            $stmt->bind_param("sssssssssisssssssss", $username, $hashed_password, $first_name, $middle_name, $last_name, $suffix, $role, $email, $phone, $gender, $date_of_birth, $age, $civil_status, $address, $barangay, $city, $emergency_contact_name, $emergency_contact_relationship, $emergency_contact_number);
             
             if ($stmt->execute()) {
                 $newPatientId = (int) $stmt->insert_id;
@@ -110,7 +139,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $conn,
                     'patient_account_created',
                     'New patient account',
-                    $full_name . ' was registered by the reception desk.',
+                    $display_full_name . ' was registered by the reception desk.',
                     $newPatientId
                 );
                 $success = 'Patient registered successfully!';
@@ -416,6 +445,11 @@ $additionalStyles = '
         box-shadow: 0 0 0 3px rgba(220, 53, 69, 0.08);
     }
     .form-row {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+    }
+    .name-grid {
         display: grid;
         grid-template-columns: repeat(2, minmax(0, 1fr));
         gap: 8px;
@@ -749,6 +783,9 @@ $additionalStyles = '
         .form-row {
             grid-template-columns: 1fr;
         }
+        .name-grid {
+            grid-template-columns: 1fr;
+        }
         .registration-header h2 {
             font-size: 1.35rem;
         }
@@ -810,10 +847,27 @@ include 'includes/header.php';
                             <span class="section-badge">Required</span>
                         </div>
 
-                        <div class="form-group">
-                            <label for="full_name">Full name <span class="required">*</span></label>
-                            <input type="text" id="full_name" name="full_name" required maxlength="<?php echo $rprFullNameMax; ?>" placeholder="Juan Dela Cruz" value="<?php echo rpr_value('full_name'); ?>">
-                            <span class="field-hint">Maximum of <?php echo $rprFullNameMax; ?> characters.</span>
+                        <div class="name-grid">
+                            <div class="form-group">
+                                <label for="first_name">First name <span class="required">*</span></label>
+                                <input type="text" id="first_name" name="first_name" required maxlength="<?php echo $rprFirstNameMax; ?>" placeholder="Juan" value="<?php echo rpr_value('first_name'); ?>">
+                                <span class="field-hint">Maximum of <?php echo $rprFirstNameMax; ?> letters.</span>
+                            </div>
+                            <div class="form-group">
+                                <label for="middle_name">Middle name</label>
+                                <input type="text" id="middle_name" name="middle_name" maxlength="<?php echo $rprMiddleNameMax; ?>" placeholder="A" value="<?php echo rpr_value('middle_name'); ?>">
+                                <span class="field-hint">Exactly 1 letter, auto-uppercase.</span>
+                            </div>
+                            <div class="form-group">
+                                <label for="last_name">Last name <span class="required">*</span></label>
+                                <input type="text" id="last_name" name="last_name" required maxlength="<?php echo $rprLastNameMax; ?>" placeholder="Dela Cruz" value="<?php echo rpr_value('last_name'); ?>">
+                                <span class="field-hint">Maximum of <?php echo $rprLastNameMax; ?> letters.</span>
+                            </div>
+                            <div class="form-group">
+                                <label for="suffix">Suffix</label>
+                                <input type="text" id="suffix" name="suffix" maxlength="<?php echo $rprSuffixMax; ?>" placeholder="Jr" value="<?php echo rpr_value('suffix'); ?>">
+                                <span class="field-hint">Optional, up to <?php echo $rprSuffixMax; ?> letters.</span>
+                            </div>
                         </div>
 
                         <div class="form-row">

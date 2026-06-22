@@ -3,6 +3,7 @@ require_once 'includes/session.php';
 checkRole('admin');
 
 require_once 'config/database.php';
+require_once __DIR__ . '/includes/name_parts.php';
 require_once __DIR__ . '/includes/patient_profile_photo.php';
 require_once __DIR__ . '/includes/admin_notifications.php';
 
@@ -11,7 +12,11 @@ $conn = getDBConnection();
 ensurePatientProfilePhotoColumn($conn);
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['account_action'] ?? '') === 'add_staff') {
-    $fullName = trim((string) ($_POST['full_name'] ?? ''));
+    $firstName = trim((string) ($_POST['first_name'] ?? ''));
+    $middleName = trim((string) ($_POST['middle_name'] ?? ''));
+    $lastName = trim((string) ($_POST['last_name'] ?? ''));
+    $suffix = trim((string) ($_POST['suffix'] ?? ''));
+    $fullNameInput = trim((string) ($_POST['full_name'] ?? ''));
     $role = trim((string) ($_POST['role'] ?? ''));
     $username = trim((string) ($_POST['username'] ?? ''));
     $password = (string) ($_POST['password'] ?? '');
@@ -19,9 +24,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['account_action'] ?? '') ==
     $email = trim((string) ($_POST['email'] ?? ''));
     $phone = trim((string) ($_POST['phone'] ?? ''));
     $allowedRoles = ['admin', 'nurse', 'receptionist'];
+    $fallbackParts = clinic_name_split_full_name($fullNameInput);
+    $firstName = $firstName !== '' ? $firstName : (string) $fallbackParts['first_name'];
+    $middleName = $middleName !== '' ? $middleName : (string) $fallbackParts['middle_name'];
+    $lastName = $lastName !== '' ? $lastName : (string) $fallbackParts['last_name'];
+    $suffix = $suffix !== '' ? $suffix : (string) $fallbackParts['suffix'];
+    $displayName = clinic_name_build_full_name([
+        'first_name' => $firstName,
+        'middle_name' => $middleName,
+        'last_name' => $lastName,
+        'suffix' => $suffix,
+    ]);
 
-    if ($fullName === '' || $username === '' || !in_array($role, $allowedRoles, true)) {
-        $_SESSION['error'] = 'Complete the full name, username, and staff role.';
+    if ($displayName === '' || $username === '' || !in_array($role, $allowedRoles, true)) {
+        $_SESSION['error'] = 'Complete the staff name, username, and staff role.';
     } elseif (strlen($password) < 8) {
         $_SESSION['error'] = 'Use a password with at least 8 characters.';
     } elseif ($password !== $confirmPassword) {
@@ -29,19 +45,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['account_action'] ?? '') ==
     } elseif ($email !== '' && !filter_var($email, FILTER_VALIDATE_EMAIL)) {
         $_SESSION['error'] = 'Enter a valid email address.';
     } else {
+        $countLetters = static fn (string $value): int => clinic_name_letter_count($value);
+        if ($countLetters($firstName) > 15) {
+            $_SESSION['error'] = 'First name must not exceed 15 letters.';
+        } elseif ($middleName !== '' && $countLetters($middleName) !== 1) {
+            $_SESSION['error'] = 'Middle name must be a single letter.';
+        } elseif ($countLetters($lastName) > 15) {
+            $_SESSION['error'] = 'Last name must not exceed 15 letters.';
+        } elseif ($suffix !== '' && $countLetters($suffix) > 3) {
+            $_SESSION['error'] = 'Suffix must not exceed 3 letters.';
+        } else {
         $hash = password_hash($password, PASSWORD_DEFAULT);
         $stmt = $conn->prepare(
-            'INSERT INTO users (username, password, full_name, role, email, phone, is_active)
-             VALUES (?, ?, ?, ?, ?, ?, 1)'
+            'INSERT INTO users (username, password, first_name, middle_name, last_name, suffix, role, email, phone, is_active)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)'
         );
-        $stmt->bind_param('ssssss', $username, $hash, $fullName, $role, $email, $phone);
+        $stmt->bind_param('sssssssss', $username, $hash, $firstName, $middleName, $lastName, $suffix, $role, $email, $phone);
         if ($stmt->execute()) {
             $newStaffId = (int) $stmt->insert_id;
             create_admin_notification(
                 $conn,
                 'staff_account_created',
                 'New staff account',
-                $fullName . ' was added as ' . ucfirst($role) . '.',
+                $displayName . ' was added as ' . ucfirst($role) . '.',
                 $newStaffId
             );
             $_SESSION['success'] = 'Staff account created successfully.';
@@ -51,6 +77,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['account_action'] ?? '') ==
                 : 'The staff account could not be created.';
         }
         $stmt->close();
+        }
     }
 
     $conn->close();
@@ -102,6 +129,8 @@ body{background:#f4f8fb;color:#1f343d}
 .account-panel-head h2{margin:0;color:#073b4c;font-size:1.2rem}
 .account-panel-head p{margin:5px 0 0;color:#657b88;font-size:.9rem;line-height:1.5}
 .staff-create-form{display:grid;gap:12px;padding:18px 20px 20px}
+.name-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.name-grid .field.full{grid-column:1 / -1}
 .field{display:grid;gap:6px}
 .field label{color:#315466;font-size:.82rem;font-weight:900}
 .field input,.field select,.directory-tools input,.directory-tools select{width:100%;min-height:42px;box-sizing:border-box;border:1px solid #cfe0e9;border-radius:7px;background:#fff;color:#183b4d;padding:9px 11px;font:inherit}
@@ -113,6 +142,7 @@ body{background:#f4f8fb;color:#1f343d}
 .primary-btn:hover{background:#0b659f}
 .account-guidance{margin:0 20px 20px;padding:13px;border-left:3px solid #0f7cc2;border-radius:6px;background:#f0f8fc;color:#456271;font-size:.86rem;line-height:1.55}
 .account-guidance a{color:#0878b8;font-weight:900}
+.name-grid .field{margin:0}
 .directory-tools{display:grid;grid-template-columns:minmax(0,1fr) 190px;gap:10px;padding:14px 20px;border-bottom:1px solid #e1ebf0}
 .account-list{display:grid}
 .account-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:13px;align-items:center;padding:14px 20px;border-bottom:1px solid #e4edf2}
@@ -194,7 +224,12 @@ include 'includes/header.php';
             </div>
             <form method="post" class="staff-create-form">
                 <input type="hidden" name="account_action" value="add_staff">
-                <div class="field"><label for="full_name">Full name</label><input id="full_name" name="full_name" required autocomplete="name"></div>
+                <div class="name-grid">
+                    <div class="field"><label for="first_name">First name</label><input id="first_name" name="first_name" maxlength="15" required autocomplete="given-name" value="<?php echo htmlspecialchars($_POST['first_name'] ?? ''); ?>"></div>
+                    <div class="field"><label for="middle_name">Middle name</label><input id="middle_name" name="middle_name" maxlength="1" autocomplete="additional-name" value="<?php echo htmlspecialchars($_POST['middle_name'] ?? ''); ?>"></div>
+                    <div class="field"><label for="last_name">Last name</label><input id="last_name" name="last_name" maxlength="15" required autocomplete="family-name" value="<?php echo htmlspecialchars($_POST['last_name'] ?? ''); ?>"></div>
+                    <div class="field"><label for="suffix">Suffix</label><input id="suffix" name="suffix" maxlength="3" autocomplete="honorific-suffix" value="<?php echo htmlspecialchars($_POST['suffix'] ?? ''); ?>"></div>
+                </div>
                 <div class="field">
                     <label for="role">Staff role</label>
                     <select id="role" name="role" required>

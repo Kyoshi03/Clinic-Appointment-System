@@ -9,7 +9,11 @@ CREATE TABLE IF NOT EXISTS users (
     id INT AUTO_INCREMENT PRIMARY KEY,
     username VARCHAR(50) UNIQUE NOT NULL,
     password VARCHAR(255) NOT NULL,
-    full_name VARCHAR(100) NOT NULL,
+    first_name VARCHAR(40) DEFAULT NULL,
+    middle_name VARCHAR(10) DEFAULT NULL,
+    last_name VARCHAR(40) DEFAULT NULL,
+    suffix VARCHAR(10) DEFAULT NULL,
+    full_name VARCHAR(100) GENERATED ALWAYS AS (TRIM(CONCAT_WS(' ', NULLIF(first_name, ''), NULLIF(middle_name, ''), NULLIF(last_name, ''), NULLIF(suffix, '')))) STORED INVISIBLE,
     role ENUM('admin', 'nurse', 'receptionist', 'patient') NOT NULL,
     email VARCHAR(100),
     phone VARCHAR(20),
@@ -48,4 +52,3 @@ CREATE TABLE IF NOT EXISTS appointments (
 -- CREATE INDEX idx_role ON users(role);
 -- CREATE INDEX idx_patient_id ON appointments(patient_id);
 -- CREATE INDEX idx_appointment_date ON appointments(appointment_date);
-

@@ -10,6 +10,7 @@ require_once __DIR__ . '/clinic_notifications.php';
 
 const APPOINTMENT_DOCTOR_DAILY_LIMIT = 30;
 const APPOINTMENT_LAB_DAILY_LIMIT = 15;
+const APPOINTMENT_CONSULTATION_DAILY_LIMIT = 30;
 
 function appointment_doctor_daily_limit(): int {
     return APPOINTMENT_DOCTOR_DAILY_LIMIT;
@@ -17,6 +18,65 @@ function appointment_doctor_daily_limit(): int {
 
 function appointment_lab_daily_limit(): int {
     return APPOINTMENT_LAB_DAILY_LIMIT;
+}
+
+function appointment_consultation_daily_limit(): int {
+    return APPOINTMENT_CONSULTATION_DAILY_LIMIT;
+}
+
+function appointment_consultation_daily_count(mysqli $conn, string $date): int {
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+        return 0;
+    }
+
+    $stmt = $conn->prepare(
+        "SELECT COUNT(*) AS total
+         FROM appointments
+         WHERE appointment_date = ?
+           AND booking_type = 'consultation'
+           AND status <> 'cancelled'"
+    );
+    $stmt->bind_param('s', $date);
+    $stmt->execute();
+    $count = (int) ($stmt->get_result()->fetch_assoc()['total'] ?? 0);
+    $stmt->close();
+    return $count;
+}
+
+/** @return array<string,int> */
+function appointment_consultation_daily_counts_between(mysqli $conn, string $dateFrom, string $dateTo): array {
+    $counts = [];
+    $stmt = $conn->prepare(
+        "SELECT appointment_date, COUNT(*) AS total
+         FROM appointments
+         WHERE appointment_date >= ?
+           AND appointment_date < ?
+           AND booking_type = 'consultation'
+           AND status <> 'cancelled'
+         GROUP BY appointment_date"
+    );
+    $stmt->bind_param('ss', $dateFrom, $dateTo);
+    $stmt->execute();
+    foreach ($stmt->get_result()->fetch_all(MYSQLI_ASSOC) as $row) {
+        $date = (string) ($row['appointment_date'] ?? '');
+        if ($date !== '') {
+            $counts[$date] = (int) ($row['total'] ?? 0);
+        }
+    }
+    $stmt->close();
+    return $counts;
+}
+
+/** @return array{booked:int,remaining:int,limit:int,is_full:bool} */
+function appointment_consultation_day_capacity(mysqli $conn, string $date): array {
+    $booked = appointment_consultation_daily_count($conn, $date);
+    $limit = appointment_consultation_daily_limit();
+    return [
+        'booked' => $booked,
+        'remaining' => max(0, $limit - $booked),
+        'limit' => $limit,
+        'is_full' => $booked >= $limit,
+    ];
 }
 
 function appointment_doctor_daily_count(mysqli $conn, int $doctorId, string $date): int {
@@ -252,35 +312,18 @@ function appointment_validate_payload(mysqli $conn, int $patientId, array $paylo
     $doctorId = (int) ($payload['doctor_id'] ?? 0);
     $doctorName = '';
     if ($type === 'consultation') {
-        if ($doctorId > 0) {
-            $doctorStmt = $conn->prepare(
-                "SELECT full_name FROM users
-                 WHERE id = ? AND role = 'doctor' AND COALESCE(is_active, 1) = 1
-                 LIMIT 1"
-            );
-            $doctorStmt->bind_param('i', $doctorId);
-            $doctorStmt->execute();
-            $doctor = $doctorStmt->get_result()->fetch_assoc();
-            $doctorStmt->close();
-            if (!$doctor) {
-                return ['ok' => false, 'error' => 'The selected doctor is no longer available. Please choose another doctor.'];
-            }
-            if (!user_is_doctor_available_at($conn, $doctorId, $date, $time)) {
-                return ['ok' => false, 'error' => 'The selected time is outside this doctor\'s clinic schedule. Please choose an available time.'];
-            }
-            $doctorName = (string) $doctor['full_name'];
-
-            $capacity = appointment_doctor_day_capacity($conn, $doctorId, $date);
-            if ($capacity['is_full']) {
-                return [
-                    'ok' => false,
-                    'error' => 'This doctor is fully booked on the selected date ('
-                        . $capacity['booked'] . '/' . $capacity['limit']
-                        . ' appointments). Please choose another date.',
-                ];
-            }
-        } else {
-            $doctorName = 'Clinic doctor assignment';
+        // Consultation assignment is finalized by the clinic. Capacity is shared
+        // across all consultation requests, not multiplied per listed doctor.
+        $doctorId = 0;
+        $doctorName = 'Clinic doctor assignment';
+        $capacity = appointment_consultation_day_capacity($conn, $date);
+        if ($capacity['is_full']) {
+            return [
+                'ok' => false,
+                'error' => 'Doctor consultations are fully booked on the selected date ('
+                    . $capacity['booked'] . '/' . $capacity['limit']
+                    . ' bookings). Please choose another date.',
+            ];
         }
     } else {
         $capacity = appointment_lab_day_capacity($conn, $date);
@@ -758,8 +801,8 @@ function appointment_verify_and_create(mysqli $conn, int $patientId, int $verifi
         $bookingType = (string) $booking['type'];
         $total = (float) $validated['total'];
         $priceChannel = (string) $booking['price_channel'];
-        if ($doctorId !== null && $bookingType === 'consultation') {
-            $capacityLockName = 'doctor-consultation-capacity-' . (int) $doctorId . '-' . $appointmentDate;
+        if ($bookingType === 'consultation') {
+            $capacityLockName = 'clinic-consultation-capacity-' . $appointmentDate;
             $lockStmt = $conn->prepare('SELECT GET_LOCK(?, 5) AS acquired');
             $lockStmt->bind_param('s', $capacityLockName);
             $lockStmt->execute();
@@ -769,12 +812,12 @@ function appointment_verify_and_create(mysqli $conn, int $patientId, int $verifi
                 throw new RuntimeException('The selected date is being updated. Please try again.');
             }
 
-            $capacity = appointment_doctor_day_capacity($conn, (int) $doctorId, $appointmentDate);
+            $capacity = appointment_consultation_day_capacity($conn, $appointmentDate);
             if ($capacity['is_full']) {
                 throw new RuntimeException(
-                    'This doctor is fully booked on the selected date ('
+                    'Doctor consultations are fully booked on the selected date ('
                     . $capacity['booked'] . '/' . $capacity['limit']
-                    . ' appointments). Please choose another date.'
+                    . ' bookings). Please choose another date.'
                 );
             }
         } elseif (in_array($bookingType, ['package', 'individual'], true)) {

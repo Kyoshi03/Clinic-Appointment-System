@@ -11,7 +11,10 @@ require_once 'includes/patient_notifications.php';
 require_once 'includes/clinic_notifications.php';
 require_once 'includes/admin_notifications.php';
 
-const PATIENT_PROFILE_NAME_MAX = 40;
+const PATIENT_PROFILE_FULL_NAME_MAX = 100;
+const PATIENT_PROFILE_NAME_PART_MAX = 15;
+const PATIENT_PROFILE_MIDDLE_NAME_MAX = 1;
+const PATIENT_PROFILE_SUFFIX_MAX = 3;
 const PATIENT_PROFILE_VERIFY_SESSION = 'patient_profile_pending_change';
 
 function patient_profile_mask_email(string $email): string {
@@ -30,6 +33,92 @@ function patient_profile_mask_phone(string $phone): string {
         return '';
     }
     return str_repeat('*', max(0, strlen($digits) - 4)) . substr($digits, -4);
+}
+
+function patient_profile_count_letters(string $value): int {
+    if ($value === '') {
+        return 0;
+    }
+    preg_match_all('/\p{L}/u', $value, $matches);
+    return count($matches[0] ?? []);
+}
+
+function patient_profile_normalize_name_part(string $value, bool $allowSeparators = false, bool $forceUppercase = false): string {
+    $value = trim(preg_replace('/\s+/u', ' ', $value) ?? '');
+    if ($value === '') {
+        return '';
+    }
+
+    $pattern = $allowSeparators ? '/[^\p{L}\s\'-]+/u' : '/[^\p{L}]+/u';
+    $value = preg_replace($pattern, '', $value) ?? '';
+    $value = trim(preg_replace('/\s+/u', ' ', $value) ?? $value);
+
+    if ($forceUppercase) {
+        $value = function_exists('mb_strtoupper') ? mb_strtoupper($value, 'UTF-8') : strtoupper($value);
+    }
+
+    return $value;
+}
+
+function patient_profile_guess_name_parts(array $row): array {
+    $first = trim((string) ($row['first_name'] ?? ''));
+    $middle = trim((string) ($row['middle_name'] ?? ''));
+    $last = trim((string) ($row['last_name'] ?? ''));
+    $suffix = trim((string) ($row['suffix'] ?? ''));
+    $full = trim((string) ($row['full_name'] ?? ''));
+
+    if (($first === '' || $last === '') && $full !== '') {
+        $tokens = preg_split('/\s+/u', $full) ?: [];
+        $tokens = array_values(array_filter(array_map('trim', $tokens), static fn ($token) => $token !== ''));
+
+        if ($tokens !== []) {
+            $knownSuffixes = ['JR', 'SR', 'II', 'III', 'IV', 'V', 'VI'];
+            $lastToken = strtoupper(preg_replace('/[^\p{L}]/u', '', (string) end($tokens)) ?? '');
+            if ($suffix === '' && $lastToken !== '' && in_array($lastToken, $knownSuffixes, true)) {
+                $suffix = array_pop($tokens) ?: '';
+            }
+
+            if ($first === '' && isset($tokens[0])) {
+                $first = (string) $tokens[0];
+            }
+
+            if ($last === '' && count($tokens) > 1) {
+                $last = (string) array_pop($tokens);
+            }
+
+            if ($middle === '' && count($tokens) > 2) {
+                $middleTokens = array_slice($tokens, 1, max(0, count($tokens) - 2));
+                $middleCandidate = trim(implode(' ', $middleTokens));
+                if ($middleCandidate !== '' && preg_match('/\p{L}/u', $middleCandidate, $middleMatch)) {
+                    $middle = $middleMatch[0] ?? '';
+                }
+            }
+        }
+    }
+
+    return [
+        'first_name' => function_exists('mb_convert_case')
+            ? mb_convert_case(patient_profile_normalize_name_part($first, true, false), MB_CASE_TITLE, 'UTF-8')
+            : ucwords(strtolower(patient_profile_normalize_name_part($first, true, false))),
+        'middle_name' => function_exists('mb_strtoupper')
+            ? mb_strtoupper(patient_profile_normalize_name_part($middle, false, true), 'UTF-8')
+            : strtoupper(patient_profile_normalize_name_part($middle, false, true)),
+        'last_name' => function_exists('mb_convert_case')
+            ? mb_convert_case(patient_profile_normalize_name_part($last, true, false), MB_CASE_TITLE, 'UTF-8')
+            : ucwords(strtolower(patient_profile_normalize_name_part($last, true, false))),
+        'suffix' => function_exists('mb_strtoupper')
+            ? mb_strtoupper(patient_profile_normalize_name_part($suffix, false, true), 'UTF-8')
+            : strtoupper(patient_profile_normalize_name_part($suffix, false, true)),
+    ];
+}
+
+function patient_profile_build_name_from_parts(array $parts): string {
+    return trim(implode(' ', array_filter([
+        patientProfileTitleCaseNamePart((string) ($parts['first_name'] ?? ''), true),
+        patientProfileUppercaseNamePart((string) ($parts['middle_name'] ?? ''), false),
+        patientProfileTitleCaseNamePart((string) ($parts['last_name'] ?? ''), true),
+        patientProfileUppercaseNamePart((string) ($parts['suffix'] ?? ''), false),
+    ], static fn ($part) => $part !== '')));
 }
 
 function patient_profile_pending_change(): ?array {
@@ -308,7 +397,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['profile_verify_submit
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['profile_action'] ?? '') === 'update_profile') {
-    $fullName = trim($_POST['full_name'] ?? '');
+    $firstName = patient_profile_normalize_name_part((string) ($_POST['first_name'] ?? ''), true, false);
+    $middleName = patient_profile_normalize_name_part((string) ($_POST['middle_name'] ?? ''), false, true);
+    $lastName = patient_profile_normalize_name_part((string) ($_POST['last_name'] ?? ''), true, false);
+    $suffix = patient_profile_normalize_name_part((string) ($_POST['suffix'] ?? ''), false, true);
+    $fullName = patientProfileBuildFullNameFromParts([
+        'first_name' => $firstName,
+        'middle_name' => $middleName,
+        'last_name' => $lastName,
+        'suffix' => $suffix,
+    ]);
     $email = trim($_POST['email'] ?? '');
     $phone = trim($_POST['phone'] ?? '');
     $gender = trim($_POST['gender'] ?? '');
@@ -349,10 +447,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['profile_action'] ?? '') ==
             && $parsedBirthDate->format('Y-m-d') === $dateOfBirth;
     }
 
-    if ($fullName === '') {
-        $profileError = 'Full name is required.';
-    } elseif ($fullNameLength > PATIENT_PROFILE_NAME_MAX) {
-        $profileError = 'Full name must not exceed ' . PATIENT_PROFILE_NAME_MAX . ' characters.';
+    if ($firstName === '' || $lastName === '') {
+        $profileError = 'First name and last name are required.';
+    } elseif (patient_profile_count_letters($firstName) > PATIENT_PROFILE_NAME_PART_MAX) {
+        $profileError = 'First name must not exceed ' . PATIENT_PROFILE_NAME_PART_MAX . ' letters.';
+    } elseif (patient_profile_count_letters($lastName) > PATIENT_PROFILE_NAME_PART_MAX) {
+        $profileError = 'Last name must not exceed ' . PATIENT_PROFILE_NAME_PART_MAX . ' letters.';
+    } elseif ($middleName !== '' && patient_profile_count_letters($middleName) !== PATIENT_PROFILE_MIDDLE_NAME_MAX) {
+        $profileError = 'Middle name must be exactly ' . PATIENT_PROFILE_MIDDLE_NAME_MAX . ' letter.';
+    } elseif ($suffix !== '' && patient_profile_count_letters($suffix) > PATIENT_PROFILE_SUFFIX_MAX) {
+        $profileError = 'Suffix must not exceed ' . PATIENT_PROFILE_SUFFIX_MAX . ' letters.';
+    } elseif ($fullName === '') {
+        $profileError = 'Please enter your full name.';
+    } elseif ($fullNameLength > PATIENT_PROFILE_FULL_NAME_MAX) {
+        $profileError = 'Full name must not exceed ' . PATIENT_PROFILE_FULL_NAME_MAX . ' characters.';
     } elseif ($email !== '' && !filter_var($email, FILTER_VALIDATE_EMAIL)) {
         $profileError = 'Please enter a valid email address.';
     } elseif ($emailChanged && $email !== '' && patient_profile_email_is_taken($conn, (int) $currentUser['id'], $email)) {
@@ -420,6 +528,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['profile_action'] ?? '') ==
         if ($profileError === '') {
             $result = updatePatientUserProfile($conn, (int) $currentUser['id'], [
                 'full_name' => $fullName,
+                'first_name' => $firstName,
+                'middle_name' => $middleName,
+                'last_name' => $lastName,
+                'suffix' => $suffix,
                 'email' => array_key_exists('email', $pendingSensitivePayload) ? $currentEmail : $email,
                 'phone' => array_key_exists('phone', $pendingSensitivePayload) ? $currentPhone : $phone,
                 'gender' => $gender,
@@ -499,6 +611,7 @@ $stmt->bind_param("i", $currentUser['id']);
 $stmt->execute();
 $userDetails = $stmt->get_result()->fetch_assoc() ?: [];
 $stmt->close();
+$profileNameParts = patient_profile_guess_name_parts($userDetails);
 
 $stmt = $conn->prepare("SELECT a.*, d.full_name AS doctor_name
     FROM appointments a
@@ -573,12 +686,20 @@ $patientUnreadNotificationCount = count_unread_patient_notifications($conn, (int
 
 $conn->close();
 
-$firstName = trim(explode(' ', $currentUser['full_name'])[0] ?? 'Patient');
+$profileDisplayName = patientProfileBuildFullNameFromParts($userDetails);
+if ($profileDisplayName === '') {
+    $profileDisplayName = trim((string) ($userDetails['full_name'] ?? $currentUser['full_name']));
+}
+if ($profileDisplayName === '') {
+    $profileDisplayName = 'Patient';
+}
+
+$firstName = trim(explode(' ', $profileDisplayName)[0] ?? 'Patient');
 $profilePhotoUrl = patientProfilePhotoUrl($userDetails['profile_photo'] ?? null, $userDetails['profile_updated_at'] ?? null);
-$profileInitials = patientProfileInitials($userDetails['full_name'] ?? $currentUser['full_name']);
+$profileInitials = patientProfileInitials($profileDisplayName);
 $headerPatientPhotoUrl = $profilePhotoUrl;
 $headerPatientInitials = $profileInitials;
-$headerPatientDisplayName = $userDetails['full_name'] ?? $currentUser['full_name'];
+$headerPatientDisplayName = $profileDisplayName;
 $showProfileSuccessPopup = $profileMessage !== '' && $pendingProfileChange === null;
 $showProfileErrorPopup = $profileError !== '' && $pendingProfileChange === null;
 $showProfileVerificationPopup = $pendingProfileChange !== null;
@@ -608,7 +729,7 @@ $welcomeSubtitle = $isNewPatientWelcome
     : 'Book appointments, check your upcoming schedule, review your health records, and keep your contact details ready for clinic updates.';
 $showGetStartedPanel = $isNewPatientWelcome || ($totalCount === 0 && $upcomingCount === 0);
 
-$hideProfileStepInGetStarted = trim((string) ($userDetails['full_name'] ?? '')) !== ''
+$hideProfileStepInGetStarted = trim((string) ($profileDisplayName ?? '')) !== ''
     && trim((string) ($userDetails['email'] ?? '')) !== ''
     && trim((string) ($userDetails['phone'] ?? '')) !== ''
     && trim((string) ($userDetails['gender'] ?? '')) !== ''
@@ -617,7 +738,7 @@ $hideProfileStepInGetStarted = trim((string) ($userDetails['full_name'] ?? '')) 
     && trim((string) ($userDetails['city'] ?? '')) !== '';
 
 $profileFields = [
-    'Full name' => $userDetails['full_name'] ?? '',
+    'Full name' => $profileDisplayName,
     'Email' => $userDetails['email'] ?? '',
     'Phone' => $userDetails['phone'] ?? '',
     'Gender' => $userDetails['gender'] ?? '',
@@ -2782,7 +2903,7 @@ include 'includes/header.php';
                             <span class="patient-profile-avatar"><?php echo htmlspecialchars($profileInitials); ?></span>
                         <?php endif; ?>
                         <div>
-                            <strong><?php echo htmlspecialchars($userDetails['full_name'] ?? $currentUser['full_name']); ?></strong>
+                            <strong><?php echo htmlspecialchars($profileDisplayName); ?></strong>
                             <span>Update photo, crop, rotate, and edit details</span>
                         </div>
                     </button>
@@ -2879,10 +3000,25 @@ include 'includes/header.php';
                 <div>
                     <div class="profile-form">
                         <div class="profile-form-grid">
-                            <div class="profile-field full">
-                                <label for="modal_full_name">Full name</label>
-                                <input type="text" id="modal_full_name" name="full_name" maxlength="<?php echo PATIENT_PROFILE_NAME_MAX; ?>" value="<?php echo htmlspecialchars($userDetails['full_name'] ?? $currentUser['full_name']); ?>" required>
-                                <span class="field-hint">Maximum of <?php echo PATIENT_PROFILE_NAME_MAX; ?> characters. <span id="modalFullNameCounter">0/<?php echo PATIENT_PROFILE_NAME_MAX; ?></span></span>
+                            <div class="profile-field">
+                                <label for="modal_first_name">First name</label>
+                                <input type="text" id="modal_first_name" name="first_name" maxlength="40" value="<?php echo htmlspecialchars($profileNameParts['first_name'] ?? ''); ?>" placeholder="Juan" required>
+                                <span class="field-hint">15 letters max. <span id="modalFirstNameCounter">0/<?php echo PATIENT_PROFILE_NAME_PART_MAX; ?></span></span>
+                            </div>
+                            <div class="profile-field">
+                                <label for="modal_middle_name">Middle name / initial <span class="optional">(optional)</span></label>
+                                <input type="text" id="modal_middle_name" name="middle_name" maxlength="4" value="<?php echo htmlspecialchars($profileNameParts['middle_name'] ?? ''); ?>" placeholder="M">
+                                <span class="field-hint">1 letter only. <span id="modalMiddleNameCounter">0/<?php echo PATIENT_PROFILE_MIDDLE_NAME_MAX; ?></span></span>
+                            </div>
+                            <div class="profile-field">
+                                <label for="modal_last_name">Last name</label>
+                                <input type="text" id="modal_last_name" name="last_name" maxlength="40" value="<?php echo htmlspecialchars($profileNameParts['last_name'] ?? ''); ?>" placeholder="Dela Cruz" required>
+                                <span class="field-hint">15 letters max. <span id="modalLastNameCounter">0/<?php echo PATIENT_PROFILE_NAME_PART_MAX; ?></span></span>
+                            </div>
+                            <div class="profile-field">
+                                <label for="modal_suffix">Suffix <span class="optional">(optional)</span></label>
+                                <input type="text" id="modal_suffix" name="suffix" maxlength="6" value="<?php echo htmlspecialchars($profileNameParts['suffix'] ?? ''); ?>" placeholder="Jr">
+                                <span class="field-hint">3 letters max. <span id="modalSuffixCounter">0/<?php echo PATIENT_PROFILE_SUFFIX_MAX; ?></span></span>
                             </div>
                             <div class="profile-field">
                                 <label for="modal_email">Email</label>
@@ -3054,21 +3190,91 @@ include 'includes/header.php';
         const photoZoomControl = document.getElementById('photoZoomControl');
         const photoZoomRange = document.getElementById('photoZoomRange');
         const photoZoomValue = document.getElementById('photoZoomValue');
-        const modalFullNameInput = document.getElementById('modal_full_name');
-        const modalFullNameCounter = document.getElementById('modalFullNameCounter');
+        const modalFirstNameInput = document.getElementById('modal_first_name');
+        const modalMiddleNameInput = document.getElementById('modal_middle_name');
+        const modalLastNameInput = document.getElementById('modal_last_name');
+        const modalSuffixInput = document.getElementById('modal_suffix');
+        const modalFirstNameCounter = document.getElementById('modalFirstNameCounter');
+        const modalMiddleNameCounter = document.getElementById('modalMiddleNameCounter');
+        const modalLastNameCounter = document.getElementById('modalLastNameCounter');
+        const modalSuffixCounter = document.getElementById('modalSuffixCounter');
         let cropper = null;
         let pendingCrop = false;
         let zoomLevel = 0;
 
-        function updateModalFullNameCounter() {
-            if (!modalFullNameInput || !modalFullNameCounter) return;
-            modalFullNameCounter.textContent = modalFullNameInput.value.length + '/<?php echo PATIENT_PROFILE_NAME_MAX; ?>';
+        function countLetters(value) {
+            const matches = String(value || '').match(/\p{L}/gu);
+            return matches ? matches.length : 0;
         }
 
-        if (modalFullNameInput) {
-            modalFullNameInput.addEventListener('input', updateModalFullNameCounter);
-            updateModalFullNameCounter();
+        function sanitizeNameField(value, options) {
+            const allowSeparators = !!(options && options.allowSeparators);
+            const forceUppercase = !!(options && options.forceUppercase);
+            const maxLetters = Number((options && options.maxLetters) || 0);
+            let nextValue = String(value || '').replace(/\s+/g, ' ');
+            const pattern = allowSeparators ? /[^\p{L}\s'-]/gu : /[^\p{L}]/gu;
+            nextValue = nextValue.replace(pattern, '');
+            nextValue = nextValue.trim();
+            if (forceUppercase) {
+                nextValue = nextValue.toUpperCase();
+            }
+
+            if (maxLetters > 0) {
+                let letters = 0;
+                let result = '';
+                for (const char of nextValue) {
+                    if (/\p{L}/u.test(char)) {
+                        if (letters >= maxLetters) {
+                            continue;
+                        }
+                        letters++;
+                    }
+                    result += char;
+                }
+                nextValue = result;
+            }
+
+            return nextValue;
         }
+
+        function syncProfileNameCounters() {
+            if (modalFirstNameInput && modalFirstNameCounter) {
+                modalFirstNameCounter.textContent = countLetters(modalFirstNameInput.value) + '/<?php echo PATIENT_PROFILE_NAME_PART_MAX; ?>';
+            }
+            if (modalMiddleNameInput && modalMiddleNameCounter) {
+                modalMiddleNameCounter.textContent = countLetters(modalMiddleNameInput.value) + '/<?php echo PATIENT_PROFILE_MIDDLE_NAME_MAX; ?>';
+            }
+            if (modalLastNameInput && modalLastNameCounter) {
+                modalLastNameCounter.textContent = countLetters(modalLastNameInput.value) + '/<?php echo PATIENT_PROFILE_NAME_PART_MAX; ?>';
+            }
+            if (modalSuffixInput && modalSuffixCounter) {
+                modalSuffixCounter.textContent = countLetters(modalSuffixInput.value) + '/<?php echo PATIENT_PROFILE_SUFFIX_MAX; ?>';
+            }
+        }
+
+        [
+            [modalFirstNameInput, { allowSeparators: true, forceUppercase: false, maxLetters: <?php echo PATIENT_PROFILE_NAME_PART_MAX; ?> }],
+            [modalMiddleNameInput, { allowSeparators: false, forceUppercase: true, maxLetters: <?php echo PATIENT_PROFILE_MIDDLE_NAME_MAX; ?> }],
+            [modalLastNameInput, { allowSeparators: true, forceUppercase: false, maxLetters: <?php echo PATIENT_PROFILE_NAME_PART_MAX; ?> }],
+            [modalSuffixInput, { allowSeparators: false, forceUppercase: true, maxLetters: <?php echo PATIENT_PROFILE_SUFFIX_MAX; ?> }]
+        ].forEach(function(pair) {
+            const input = pair[0];
+            const options = pair[1];
+            if (!input) return;
+            input.addEventListener('input', function() {
+                const nextValue = sanitizeNameField(input.value, options);
+                if (nextValue !== input.value) {
+                    const pos = input.selectionStart;
+                    input.value = nextValue;
+                    if (typeof pos === 'number') {
+                        input.setSelectionRange(Math.min(pos, nextValue.length), Math.min(pos, nextValue.length));
+                    }
+                }
+                syncProfileNameCounters();
+            });
+        });
+
+        syncProfileNameCounters();
 
         function openProfileModal() {
             modal.classList.add('active');

@@ -3,6 +3,7 @@ require_once 'includes/session.php';
 checkRole('admin');
 
 require_once 'config/database.php';
+require_once __DIR__ . '/includes/name_parts.php';
 require_once __DIR__ . '/includes/doctor_schedule.php';
 require_once __DIR__ . '/includes/admin_notifications.php';
 
@@ -60,6 +61,75 @@ function admin_doctor_time_label(string $time): string {
 function admin_doctor_slot_label(array $slot, array $dayNames): string {
     $day = $dayNames[(int) ($slot['day_of_week'] ?? 0)] ?? 'Day';
     return $day . ', ' . admin_doctor_time_label((string) ($slot['time_start'] ?? '')) . ' - ' . admin_doctor_time_label((string) ($slot['time_end'] ?? ''));
+}
+
+function admin_doctor_resolve_name_parts(array $source): array {
+    $fullNameInput = trim((string) ($source['full_name'] ?? ''));
+    $firstName = trim((string) ($source['first_name'] ?? ''));
+    $middleName = trim((string) ($source['middle_name'] ?? ''));
+    $lastName = trim((string) ($source['last_name'] ?? ''));
+    $suffix = trim((string) ($source['suffix'] ?? ''));
+    if ($firstName === '' && $middleName === '' && $lastName === '' && $suffix === '' && $fullNameInput !== '') {
+        $parsed = clinic_name_split_full_name($fullNameInput);
+        $firstName = (string) ($parsed['first_name'] ?? '');
+        $middleName = (string) ($parsed['middle_name'] ?? '');
+        $lastName = (string) ($parsed['last_name'] ?? '');
+        $suffix = (string) ($parsed['suffix'] ?? '');
+    }
+
+    $firstName = clinic_name_title_case_part($firstName, true);
+    $middleName = clinic_name_uppercase_part($middleName, false);
+    $lastName = clinic_name_title_case_part($lastName, true);
+    $suffix = clinic_name_uppercase_part($suffix, false);
+
+    return [
+        'first_name' => $firstName,
+        'middle_name' => $middleName,
+        'last_name' => $lastName,
+        'suffix' => $suffix,
+        'display_name' => clinic_name_build_full_name([
+            'first_name' => $firstName,
+            'middle_name' => $middleName,
+            'last_name' => $lastName,
+            'suffix' => $suffix,
+        ]),
+    ];
+}
+
+function admin_doctor_validate_name_parts(array $nameParts): string {
+    $countLetters = static function (string $value): int {
+        if ($value === '') {
+            return 0;
+        }
+        preg_match_all('/\p{L}/u', $value, $matches);
+        return count($matches[0] ?? []);
+    };
+
+    $firstName = (string) ($nameParts['first_name'] ?? '');
+    $middleName = (string) ($nameParts['middle_name'] ?? '');
+    $lastName = (string) ($nameParts['last_name'] ?? '');
+    $suffix = (string) ($nameParts['suffix'] ?? '');
+
+    if ($firstName === '') {
+        return 'First name is required.';
+    }
+    if ($lastName === '') {
+        return 'Last name is required.';
+    }
+    if ($countLetters($firstName) > 15) {
+        return 'First name must not exceed 15 letters.';
+    }
+    if ($middleName !== '' && $countLetters($middleName) !== 1) {
+        return 'Middle name must be exactly 1 letter.';
+    }
+    if ($countLetters($lastName) > 15) {
+        return 'Last name must not exceed 15 letters.';
+    }
+    if ($suffix !== '' && $countLetters($suffix) > 3) {
+        return 'Suffix must not exceed 3 letters.';
+    }
+
+    return '';
 }
 
 function admin_doctor_parse_schedule_slots(bool $required = true): array {
@@ -263,13 +333,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     } elseif ($act === 'save_profile') {
         $id = (int) ($_POST['user_id'] ?? 0);
-        $name = trim((string) ($_POST['full_name'] ?? ''));
+        $nameParts = admin_doctor_resolve_name_parts($_POST);
         $spec = trim((string) ($_POST['specialty'] ?? ''));
         $email = trim((string) ($_POST['email'] ?? ''));
         $phone = trim((string) ($_POST['phone'] ?? ''));
-        if ($id > 0 && $name !== '') {
-            $stmt = $conn->prepare("UPDATE users SET full_name = ?, specialty = ?, email = ?, phone = ? WHERE id = ? AND role = 'doctor'");
-            $stmt->bind_param('ssssi', $name, $spec, $email, $phone, $id);
+        $name = $nameParts['display_name'];
+        $nameError = admin_doctor_validate_name_parts($nameParts);
+        if ($id <= 0) {
+            $error = 'Invalid doctor account.';
+        } elseif ($nameError !== '') {
+            $error = $nameError;
+        } elseif ($name !== '') {
+            $stmt = $conn->prepare("UPDATE users SET first_name = ?, middle_name = ?, last_name = ?, suffix = ?, specialty = ?, email = ?, phone = ? WHERE id = ? AND role = 'doctor'");
+            $stmt->bind_param('sssssssi', $nameParts['first_name'], $nameParts['middle_name'], $nameParts['last_name'], $nameParts['suffix'], $spec, $email, $phone, $id);
             if ($stmt->execute()) {
                 $message = 'Doctor profile updated.';
             } else {
@@ -277,17 +353,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             $stmt->close();
         } else {
-            $error = 'Full name is required.';
+            $error = 'Doctor name is required.';
         }
     } elseif ($act === 'add_doctor') {
-        $name = trim((string) ($_POST['full_name'] ?? ''));
+        $nameParts = admin_doctor_resolve_name_parts($_POST);
+        $name = $nameParts['display_name'];
         $spec = trim((string) ($_POST['specialty'] ?? ''));
         $email = trim((string) ($_POST['email'] ?? ''));
         $phone = trim((string) ($_POST['phone'] ?? ''));
         $parsed = admin_doctor_parse_schedule_slots(true);
+        $nameError = admin_doctor_validate_name_parts($nameParts);
 
-        if ($name === '') {
-            $error = 'Full name is required.';
+        if ($nameError !== '') {
+            $error = $nameError;
             $openAddDoctorModal = true;
         } elseif ($parsed['error'] !== '') {
             $error = $parsed['error'];
@@ -297,8 +375,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             try {
                 $username = admin_doctor_unique_username($conn, $name);
                 $hash = password_hash($defaultDoctorPassword, PASSWORD_DEFAULT);
-                $stmt = $conn->prepare("INSERT INTO users (username, password, full_name, role, specialty, email, phone, is_active) VALUES (?, ?, ?, 'doctor', ?, ?, ?, 1)");
-                $stmt->bind_param('ssssss', $username, $hash, $name, $spec, $email, $phone);
+                $stmt = $conn->prepare("INSERT INTO users (username, password, first_name, middle_name, last_name, suffix, role, specialty, email, phone, is_active) VALUES (?, ?, ?, ?, ?, ?, 'doctor', ?, ?, ?, ?, 1)");
+                $stmt->bind_param('sssssssss', $username, $hash, $nameParts['first_name'], $nameParts['middle_name'], $nameParts['last_name'], $nameParts['suffix'], $spec, $email, $phone);
                 if (!$stmt->execute()) {
                     throw new RuntimeException('Doctor account insert failed.');
                 }
@@ -327,19 +405,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 $editId = isset($_GET['edit']) ? (int) $_GET['edit'] : 0;
 $editDoctor = null;
 $editSlots = [];
+$editDoctorNameParts = [
+    'first_name' => '',
+    'middle_name' => '',
+    'last_name' => '',
+    'suffix' => '',
+];
 if ($editId > 0) {
-    $stmt = $conn->prepare("SELECT id, username, full_name, specialty, email, phone, COALESCE(is_active, 1) AS is_active FROM users WHERE id = ? AND role = 'doctor'");
+    $stmt = $conn->prepare("SELECT id, username, full_name, first_name, middle_name, last_name, suffix, specialty, email, phone, COALESCE(is_active, 1) AS is_active FROM users WHERE id = ? AND role = 'doctor'");
     $stmt->bind_param('i', $editId);
     $stmt->execute();
     $editDoctor = $stmt->get_result()->fetch_assoc();
     $stmt->close();
     if ($editDoctor) {
+        $editDoctorNameParts = admin_doctor_resolve_name_parts($editDoctor);
         $editSlots = doctor_fetch_availability_slots($conn, $editId);
     }
 }
 
 $doctors = [];
-$result = $conn->query("SELECT id, username, full_name, specialty, email, phone, COALESCE(is_active, 1) AS is_active FROM users WHERE role = 'doctor' ORDER BY full_name ASC");
+$result = $conn->query("SELECT id, username, full_name, first_name, middle_name, last_name, suffix, specialty, email, phone, COALESCE(is_active, 1) AS is_active FROM users WHERE role = 'doctor' ORDER BY full_name ASC");
 if ($result) {
     while ($doctor = $result->fetch_assoc()) {
         $doctor['slots'] = doctor_fetch_availability_slots($conn, (int) $doctor['id']);
@@ -695,6 +780,16 @@ select:focus {
     grid-column: 1 / -1;
 }
 
+.name-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+}
+
+.name-grid .full {
+    grid-column: 1 / -1;
+}
+
 .slot-row {
     display: grid;
     grid-template-columns: 1.1fr 1fr 1fr auto;
@@ -1003,7 +1098,12 @@ include 'includes/header.php';
                     <form method="post">
                         <input type="hidden" name="doctor_admin_action" value="save_profile">
                         <input type="hidden" name="user_id" value="<?php echo (int) $editDoctor['id']; ?>">
-                        <div class="field"><label>Full name</label><input name="full_name" value="<?php echo htmlspecialchars($editDoctor['full_name']); ?>" required></div>
+                        <div class="name-grid">
+                            <div class="field"><label>First name</label><input name="first_name" value="<?php echo htmlspecialchars($editDoctorNameParts['first_name']); ?>" maxlength="15" required></div>
+                            <div class="field"><label>Middle name</label><input name="middle_name" value="<?php echo htmlspecialchars($editDoctorNameParts['middle_name']); ?>" maxlength="1" placeholder="M"></div>
+                            <div class="field"><label>Last name</label><input name="last_name" value="<?php echo htmlspecialchars($editDoctorNameParts['last_name']); ?>" maxlength="15" required></div>
+                            <div class="field"><label>Suffix</label><input name="suffix" value="<?php echo htmlspecialchars($editDoctorNameParts['suffix']); ?>" maxlength="3" placeholder="Jr"></div>
+                        </div>
                         <div class="field"><label>Specialty</label><input name="specialty" value="<?php echo htmlspecialchars($editDoctor['specialty'] ?? ''); ?>"></div>
                         <div class="field"><label>Email</label><input type="email" name="email" value="<?php echo htmlspecialchars($editDoctor['email'] ?? ''); ?>"></div>
                         <div class="field"><label>Phone</label><input name="phone" value="<?php echo htmlspecialchars($editDoctor['phone'] ?? ''); ?>"></div>
@@ -1142,7 +1242,12 @@ include 'includes/header.php';
                 <input type="hidden" name="doctor_admin_action" value="add_doctor">
                 <p class="schedule-hint">Username is generated automatically. Default password: <strong><?php echo htmlspecialchars($defaultDoctorPassword); ?></strong>.</p>
                 <div class="form-grid">
-                    <div class="field full"><label for="new_full_name">Full name</label><input id="new_full_name" name="full_name" value="<?php echo htmlspecialchars($_POST['full_name'] ?? ''); ?>" required></div>
+                    <div class="name-grid full">
+                        <div class="field"><label for="new_first_name">First name</label><input id="new_first_name" name="first_name" maxlength="15" value="<?php echo htmlspecialchars($_POST['first_name'] ?? ''); ?>" required></div>
+                        <div class="field"><label for="new_middle_name">Middle name</label><input id="new_middle_name" name="middle_name" maxlength="1" placeholder="M" value="<?php echo htmlspecialchars($_POST['middle_name'] ?? ''); ?>"></div>
+                        <div class="field"><label for="new_last_name">Last name</label><input id="new_last_name" name="last_name" maxlength="15" value="<?php echo htmlspecialchars($_POST['last_name'] ?? ''); ?>" required></div>
+                        <div class="field"><label for="new_suffix">Suffix</label><input id="new_suffix" name="suffix" maxlength="3" placeholder="Jr" value="<?php echo htmlspecialchars($_POST['suffix'] ?? ''); ?>"></div>
+                    </div>
                     <div class="field"><label for="new_specialty">Specialty</label><input id="new_specialty" name="specialty" placeholder="e.g. Pediatrician" value="<?php echo htmlspecialchars($_POST['specialty'] ?? ''); ?>"></div>
                     <div class="field"><label for="new_email">Email</label><input type="email" id="new_email" name="email" value="<?php echo htmlspecialchars($_POST['email'] ?? ''); ?>"></div>
                     <div class="field"><label for="new_phone">Phone</label><input id="new_phone" name="phone" value="<?php echo htmlspecialchars($_POST['phone'] ?? ''); ?>"></div>

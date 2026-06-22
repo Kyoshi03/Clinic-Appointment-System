@@ -21,6 +21,68 @@ $passwordPopupMessage = '';
 $registeredUsername = '';
 $registeredDisplayName = '';
 
+function register_patient_normalize_text(string $value): string {
+    $value = trim(preg_replace('/\s+/u', ' ', $value) ?? '');
+    return $value;
+}
+
+function register_patient_letter_count(string $value): int {
+    if ($value === '') {
+        return 0;
+    }
+
+    return preg_match_all('/\p{L}/u', $value) ?: 0;
+}
+
+function register_patient_filter_name_part(string $value, bool $allowSeparators = false): string {
+    $value = register_patient_normalize_text($value);
+    if ($value === '') {
+        return '';
+    }
+
+    $pattern = $allowSeparators ? '/[^\p{L}\s\'-]+/u' : '/[^\p{L}]+/u';
+    $value = preg_replace($pattern, '', $value) ?? '';
+
+    if ($allowSeparators) {
+        $value = register_patient_normalize_text($value);
+    }
+
+    return $value;
+}
+
+function register_patient_title_case(string $value): string {
+    $value = register_patient_filter_name_part($value, true);
+    if ($value === '') {
+        return '';
+    }
+
+    return function_exists('mb_convert_case')
+        ? mb_convert_case($value, MB_CASE_TITLE, 'UTF-8')
+        : ucwords(strtolower($value));
+}
+
+function register_patient_uppercase(string $value): string {
+    $value = register_patient_filter_name_part($value, false);
+    if ($value === '') {
+        return '';
+    }
+
+    return function_exists('mb_strtoupper')
+        ? mb_strtoupper($value, 'UTF-8')
+        : strtoupper($value);
+}
+
+function register_patient_build_full_name(string $firstName, string $middleName, string $lastName, string $suffix = ''): string {
+    $parts = array_filter([
+        register_patient_title_case($firstName),
+        register_patient_uppercase($middleName),
+        register_patient_title_case($lastName),
+        register_patient_uppercase($suffix),
+    ], static fn ($part) => $part !== '');
+
+    return trim(implode(' ', $parts));
+}
+
 if (
     $_SERVER['REQUEST_METHOD'] === 'GET'
     && isset($_GET['created'])
@@ -37,7 +99,11 @@ if (
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $full_name = trim($_POST['full_name'] ?? '');
+    $first_name = register_patient_normalize_text((string) ($_POST['first_name'] ?? ''));
+    $middle_name = register_patient_normalize_text((string) ($_POST['middle_name'] ?? ''));
+    $last_name = register_patient_normalize_text((string) ($_POST['last_name'] ?? ''));
+    $suffix = register_patient_normalize_text((string) ($_POST['suffix'] ?? ''));
+    $full_name = register_patient_build_full_name($first_name, $middle_name, $last_name, $suffix);
     $gender = $_POST['gender'] ?? '';
     $date_of_birth = $_POST['date_of_birth'] ?? '';
     $civil_status = trim($_POST['civil_status'] ?? '');
@@ -57,7 +123,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $emergency_contact_relationship = trim($_POST['emergency_contact_relationship'] ?? '');
     $emergency_contact_number = trim($_POST['emergency_contact_number'] ?? '');
     $agree_clinic_terms = !empty($_POST['agree_clinic_terms']);
-    $fullNameLength = function_exists('mb_strlen') ? mb_strlen($full_name) : strlen($full_name);
     $todayDate = date('Y-m-d');
     $birthDateIsValid = false;
     
@@ -97,10 +162,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
     
     // Validation
-    if (empty($full_name) || empty($gender) || empty($date_of_birth) || empty($phone) || empty($barangay) || empty($city) || empty($username) || empty($password) || empty($confirm_password)) {
+    if (
+        empty($first_name) || empty($middle_name) || empty($last_name)
+        || empty($gender) || empty($date_of_birth) || empty($phone)
+        || empty($barangay) || empty($city) || empty($username)
+        || empty($password) || empty($confirm_password)
+    ) {
         $error = 'Please fill in all required fields marked with *.';
-    } elseif ($fullNameLength > 40) {
-        $error = 'Full name must not exceed 40 characters.';
+    } elseif (register_patient_letter_count($first_name) < 1) {
+        $error = 'First name must contain at least 1 letter.';
+    } elseif (register_patient_letter_count($first_name) > 15) {
+        $error = 'First name must not exceed 15 letters.';
+    } elseif (!preg_match('/^[\p{L}\s\'-]+$/u', $first_name)) {
+        $error = 'First name may only contain letters, spaces, hyphens, or apostrophes.';
+    } elseif (register_patient_letter_count($middle_name) !== 1) {
+        $error = 'Middle name must be exactly 1 letter.';
+    } elseif (!preg_match('/^[\p{L}]$/u', $middle_name)) {
+        $error = 'Middle name must contain letters only.';
+    } elseif (register_patient_letter_count($last_name) < 1) {
+        $error = 'Last name must contain at least 1 letter.';
+    } elseif (register_patient_letter_count($last_name) > 15) {
+        $error = 'Last name must not exceed 15 letters.';
+    } elseif (!preg_match('/^[\p{L}\s\'-]+$/u', $last_name)) {
+        $error = 'Last name may only contain letters, spaces, hyphens, or apostrophes.';
+    } elseif ($suffix !== '' && register_patient_letter_count($suffix) < 1) {
+        $error = 'Suffix must contain at least 1 letter.';
+    } elseif ($suffix !== '' && register_patient_letter_count($suffix) > 3) {
+        $error = 'Suffix must not exceed 3 letters.';
+    } elseif ($suffix !== '' && !preg_match('/^[\p{L}]+$/u', $suffix)) {
+        $error = 'Suffix must contain letters only.';
     } elseif (!$birthDateIsValid) {
         $error = 'Please enter a valid date of birth.';
     } elseif ($date_of_birth > $todayDate) {
@@ -194,6 +284,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         'role' => $role,
                         'email' => $email,
                         'phone' => $phone,
+                        'first_name' => register_patient_title_case($first_name),
+                        'middle_name' => register_patient_uppercase($middle_name),
+                        'last_name' => register_patient_title_case($last_name),
+                        'suffix' => register_patient_uppercase($suffix),
                         'gender' => $gender,
                         'date_of_birth' => $date_of_birth,
                         'age' => $age,
@@ -348,6 +442,26 @@ $additionalStyles = '
         grid-template-columns: 1fr 1fr;
         gap: 15px;
         margin-bottom: 20px;
+    }
+    .name-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 15px;
+        margin-bottom: 15px;
+    }
+    .name-grid--bottom {
+        margin-bottom: 0;
+    }
+    .name-part {
+        margin-bottom: 0;
+    }
+    .name-part label {
+        font-size: 0.8rem;
+        margin-bottom: 7px;
+    }
+    .name-part .field-hint {
+        margin-top: 8px;
+        margin-bottom: 0;
     }
     .form-group {
         margin-bottom: 20px;
@@ -1154,6 +1268,9 @@ $additionalStyles = '
         .form-row {
             grid-template-columns: 1fr;
         }
+        .name-grid {
+            grid-template-columns: 1fr;
+        }
         .verification-options {
             grid-template-columns: 1fr;
         }
@@ -1214,14 +1331,54 @@ $additionalStyles = '
                     <div class="form-section-title">Personal Information</div>
                     
                     <div class="form-group">
-                        <label for="full_name">Full Name</label>
-                        <div class="input-wrapper">
-                            <svg class="input-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                            </svg>
-                            <input type="text" id="full_name" name="full_name" placeholder="Enter your full name" maxlength="40" required autofocus value="<?php echo (!empty($success) ? '' : (isset($_POST['full_name']) ? htmlspecialchars($_POST['full_name']) : '')); ?>">
+                        <label>Name Details</label>
+                        <div class="name-grid">
+                            <div class="name-part">
+                                <label for="first_name">First Name</label>
+                                <div class="input-wrapper">
+                                    <svg class="input-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                                    </svg>
+                                    <input type="text" id="first_name" name="first_name" placeholder="Juan" maxlength="40" required autofocus value="<?php echo (!empty($success) ? '' : (isset($_POST['first_name']) ? htmlspecialchars($_POST['first_name']) : '')); ?>">
+                                </div>
+                                <span class="field-hint">15 letters max. <span id="firstNameCounter">0/15</span></span>
+                            </div>
+
+                            <div class="name-part">
+                                <label for="middle_name">Middle Name / Initial</label>
+                                <div class="input-wrapper">
+                                    <svg class="input-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                                    </svg>
+                                    <input type="text" id="middle_name" name="middle_name" placeholder="M" maxlength="1" required value="<?php echo (!empty($success) ? '' : (isset($_POST['middle_name']) ? htmlspecialchars($_POST['middle_name']) : '')); ?>" style="text-transform: uppercase;">
+                                </div>
+                                <span class="field-hint">1 letter only. <span id="middleNameCounter">0/1</span></span>
+                            </div>
                         </div>
-                        <span class="field-hint">Maximum of 40 characters. <span id="fullNameCounter">0/40</span></span>
+
+                        <div class="name-grid name-grid--bottom">
+                            <div class="name-part">
+                                <label for="last_name">Last Name</label>
+                                <div class="input-wrapper">
+                                    <svg class="input-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                                    </svg>
+                                    <input type="text" id="last_name" name="last_name" placeholder="Dela Cruz" maxlength="40" required value="<?php echo (!empty($success) ? '' : (isset($_POST['last_name']) ? htmlspecialchars($_POST['last_name']) : '')); ?>">
+                                </div>
+                                <span class="field-hint">15 letters max. <span id="lastNameCounter">0/15</span></span>
+                            </div>
+
+                            <div class="name-part">
+                                <label for="suffix">Suffix <span class="optional">(Optional)</span></label>
+                                <div class="input-wrapper">
+                                    <svg class="input-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                                    </svg>
+                                    <input type="text" id="suffix" name="suffix" placeholder="Jr" maxlength="3" value="<?php echo (!empty($success) ? '' : (isset($_POST['suffix']) ? htmlspecialchars($_POST['suffix']) : '')); ?>" style="text-transform: uppercase;">
+                                </div>
+                                <span class="field-hint">3 letters max. <span id="suffixCounter">0/3</span></span>
+                            </div>
+                        </div>
                     </div>
                     
                     <div class="form-row">
@@ -1708,8 +1865,14 @@ $additionalStyles = '
             const confirmPasswordInput = document.getElementById('confirm_password');
             const passwordToggle = document.getElementById('passwordToggle');
             const confirmPasswordToggle = document.getElementById('confirmPasswordToggle');
-            const fullNameInput = document.getElementById('full_name');
-            const fullNameCounter = document.getElementById('fullNameCounter');
+            const firstNameInput = document.getElementById('first_name');
+            const middleNameInput = document.getElementById('middle_name');
+            const lastNameInput = document.getElementById('last_name');
+            const suffixInput = document.getElementById('suffix');
+            const firstNameCounter = document.getElementById('firstNameCounter');
+            const middleNameCounter = document.getElementById('middleNameCounter');
+            const lastNameCounter = document.getElementById('lastNameCounter');
+            const suffixCounter = document.getElementById('suffixCounter');
             const emailInput = document.getElementById('email');
             const emailVerificationOption = document.getElementById('emailVerificationOption');
             const emailVerificationRadio = document.querySelector('input[name="verification_channel"][value="email"]');
@@ -1737,15 +1900,65 @@ $additionalStyles = '
             let calendarMonth = todayDate.getMonth();
             let calendarYear = todayDate.getFullYear();
 
-            function updateFullNameCounter() {
-                if (!fullNameInput || !fullNameCounter) return;
-                fullNameCounter.textContent = fullNameInput.value.length + '/40';
+                        function countLetters(value) {
+                return (value.match(/\p{L}/gu) || []).length;
             }
 
-            if (fullNameInput) {
-                fullNameInput.addEventListener('input', updateFullNameCounter);
-                updateFullNameCounter();
+            function updateNameField(input, counter, maxLetters, options = {}) {
+                if (!input) return;
+                const allowSeparators = !!options.allowSeparators;
+                const forceUppercase = !!options.forceUppercase;
+                let value = input.value || '';
+
+                value = allowSeparators
+                    ? value.replace(/[^\p{L}\s'-]/gu, '')
+                    : value.replace(/[^\p{L}]/gu, '');
+
+                if (allowSeparators) {
+                    value = value.replace(/\s+/g, ' ').trimStart();
+                }
+
+                value = forceUppercase ? value.toUpperCase() : value;
+
+                if (!allowSeparators) {
+                    value = value.slice(0, maxLetters);
+                } else if (maxLetters > 0) {
+                    let letterTotal = 0;
+                    let clipped = '';
+                    for (const char of value) {
+                        if (/\p{L}/u.test(char)) {
+                            letterTotal++;
+                            if (letterTotal > maxLetters) {
+                                break;
+                            }
+                        }
+                        clipped += char;
+                    }
+                    value = clipped;
+                }
+
+                if (input.value !== value) {
+                    input.value = value;
+                }
+
+                if (counter) {
+                    counter.textContent = countLetters(value) + '/' + maxLetters;
+                }
             }
+
+            const nameFieldConfigs = [
+                [firstNameInput, firstNameCounter, 15, { allowSeparators: true, forceUppercase: false }],
+                [middleNameInput, middleNameCounter, 1, { allowSeparators: false, forceUppercase: true }],
+                [lastNameInput, lastNameCounter, 15, { allowSeparators: true, forceUppercase: false }],
+                [suffixInput, suffixCounter, 3, { allowSeparators: false, forceUppercase: true }]
+            ];
+
+            nameFieldConfigs.forEach(([input, counter, maxLetters, options]) => {
+                if (!input) return;
+                input.addEventListener('input', () => updateNameField(input, counter, maxLetters, options));
+                input.addEventListener('blur', () => updateNameField(input, counter, maxLetters, options));
+                updateNameField(input, counter, maxLetters, options);
+            });
 
             function updateVerificationChoices() {
                 if (!emailInput || !emailVerificationRadio || !smsVerificationRadio) return;
@@ -2117,3 +2330,4 @@ $additionalStyles = '
     </script>
 </body>
 </html>
+

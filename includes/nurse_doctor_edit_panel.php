@@ -17,9 +17,23 @@ if (empty($panelSlots)) {
             <form method="post" action="nurse_doctors.php">
                 <input type="hidden" name="nurse_doctor_action" value="save_profile">
                 <input type="hidden" name="user_id" value="<?php echo $doctorId; ?>">
-                <div class="field">
-                    <label>Full name</label>
-                    <input name="full_name" value="<?php echo htmlspecialchars((string) ($panelDoctor['full_name'] ?? '')); ?>" required>
+                <div class="name-grid full">
+                    <div class="field">
+                        <label>First name</label>
+                        <input name="first_name" maxlength="15" value="<?php echo htmlspecialchars((string) ($panelDoctor['first_name'] ?? '')); ?>" required>
+                    </div>
+                    <div class="field">
+                        <label>Middle name</label>
+                        <input name="middle_name" maxlength="1" value="<?php echo htmlspecialchars((string) ($panelDoctor['middle_name'] ?? '')); ?>" required style="text-transform:uppercase;">
+                    </div>
+                    <div class="field">
+                        <label>Last name</label>
+                        <input name="last_name" maxlength="15" value="<?php echo htmlspecialchars((string) ($panelDoctor['last_name'] ?? '')); ?>" required>
+                    </div>
+                    <div class="field">
+                        <label>Suffix</label>
+                        <input name="suffix" maxlength="3" value="<?php echo htmlspecialchars((string) ($panelDoctor['suffix'] ?? '')); ?>" style="text-transform:uppercase;">
+                    </div>
                 </div>
                 <div class="field">
                     <label>Specialty</label>
